@@ -46,7 +46,17 @@ export class LBM3DSolver {
     const device = this.device;
     const tc = this.totalCells;
 
+    device.pushErrorScope('validation');
+    device.pushErrorScope('internal');
     const shaderModule = device.createShaderModule({ code: shaderSource });
+    const compilationInfo = await shaderModule.getCompilationInfo();
+    for (const msg of compilationInfo.messages) {
+      console.warn(`[WGSL ${msg.type}] line ${msg.lineNum}: ${msg.message}`);
+    }
+    const internalErr = await device.popErrorScope();
+    const validationErr = await device.popErrorScope();
+    if (internalErr) console.error('[WebGPU internal]', internalErr.message);
+    if (validationErr) console.error('[WebGPU validation]', validationErr.message);
 
     const fSize = tc * 19 * 4;
     const storageFlags = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
@@ -163,24 +173,36 @@ export class LBM3DSolver {
     this.device.queue.submit([encoder.finish()]);
   }
 
+  private _readbackCount = 0;
+
   async readbackMacro(): Promise<Float32Array> {
     if (this.readbackPending) return this.macroData;
     this.readbackPending = true;
 
-    const size = this.totalCells * 7 * 4;
-    const encoder = this.device.createCommandEncoder();
-    encoder.copyBufferToBuffer(this.macroBuffer, 0, this.readbackBuffer, 0, size);
-    this.device.queue.submit([encoder.finish()]);
-
     try {
+      const size = this.totalCells * 7 * 4;
+      const encoder = this.device.createCommandEncoder();
+      encoder.copyBufferToBuffer(this.macroBuffer, 0, this.readbackBuffer, 0, size);
+      this.device.queue.submit([encoder.finish()]);
+
       await this.readbackBuffer.mapAsync(GPUMapMode.READ);
       const mapped = this.readbackBuffer.getMappedRange();
-      this.macroData = new Float32Array(mapped.slice(0));
+      const data = new Float32Array(mapped.slice(0));
       this.readbackBuffer.unmap();
-    } catch {
-      // Buffer busy, skip this frame
+      this.macroData = data;
+
+      // Log first successful readback to confirm data flow
+      if (this._readbackCount < 3) {
+        let nonZero = 0;
+        for (let i = 0; i < Math.min(data.length, 10000); i++) { if (data[i] !== 0) nonZero++; }
+        console.log(`[LBM3D] readback #${this._readbackCount}: ${nonZero} non-zero values in first 10k`);
+        this._readbackCount++;
+      }
+    } catch (e) {
+      if (this._readbackCount < 3) console.warn('[LBM3D] readback failed:', e);
+    } finally {
+      this.readbackPending = false;
     }
-    this.readbackPending = false;
     return this.macroData;
   }
 

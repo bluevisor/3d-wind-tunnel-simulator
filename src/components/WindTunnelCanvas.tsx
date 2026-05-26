@@ -435,8 +435,9 @@ export default function WindTunnelCanvas({
     keyLight.shadow.camera.bottom = -20 * gs;
     keyLight.shadow.camera.near = 10 * gs;
     keyLight.shadow.camera.far = 300 * gs;
-    keyLight.shadow.bias = -0.001;
+    keyLight.shadow.bias = -0.0005;
     keyLight.target.position.set(obsCx, 0, 0);
+    keyLight.shadow.camera.updateProjectionMatrix();
     scene.add(keyLight);
     scene.add(keyLight.target);
 
@@ -968,7 +969,7 @@ export default function WindTunnelCanvas({
           for (let s = 0; s < p.stepsPerFrame; s++) {
             solver3D.step(u0, visc);
           }
-          solver3D.readbackMacro().catch(() => {});
+          solver3D.readbackMacro().catch((e) => console.warn('[LBM3D] readback error:', e));
         } else if (solver.isStable) {
           for (let s = 0; s < p.stepsPerFrame; s++) {
             solver.step(u0, visc);
