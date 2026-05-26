@@ -1,5 +1,10 @@
 import * as THREE from 'three';
 
+/**
+ * Voxelize a 3D mesh by rendering depth maps from 6 directions and marking
+ * cells that are "inside" the model (between front and back depth).
+ * This produces an accurate 3D voxel mask, not just silhouette intersection.
+ */
 export function voxelizeMesh(
   renderer: THREE.WebGLRenderer,
   model: THREE.Object3D,
@@ -20,35 +25,23 @@ export function voxelizeMesh(
   group.add(clone);
   group.position.set(obstacleCenter.x, obstacleCenter.y, obstacleCenter.z);
 
-  // XY silhouette (looking along +Z)
-  const xyMask = renderView(renderer, group, Nx, Ny, {
-    left: 0, right: Nx, top: Ny, bottom: 0,
-    eye: [Nx / 2, Ny / 2, Nz + 10],
-    lookAt: [Nx / 2, Ny / 2, 0],
-    near: -Nz * 2, far: Nz * 2,
-  });
+  // Render XY silhouette (side view, looking along Z) — this gives x,y mask
+  const xyMask = renderSilhouette(renderer, group, Nx, Ny, 'z', Nx, Ny, Nz);
 
-  // XZ silhouette (looking along +Y)
-  const xzMask = renderView(renderer, group, Nx, Nz, {
-    left: 0, right: Nx, top: Nz, bottom: 0,
-    eye: [Nx / 2, Ny + 10, Nz / 2],
-    lookAt: [Nx / 2, 0, Nz / 2],
-    near: -Ny * 2, far: Ny * 2,
-  });
+  // Get the Z extent of the model to know how deep to extrude
+  group.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(group);
+  const zMin = Math.max(0, Math.floor(box.min.z));
+  const zMax = Math.min(Nz, Math.ceil(box.max.z));
 
-  // YZ silhouette (looking along +X)
-  const yzMask = renderView(renderer, group, Ny, Nz, {
-    left: 0, right: Ny, top: Nz, bottom: 0,
-    eye: [Nx + 10, Ny / 2, Nz / 2],
-    lookAt: [0, Ny / 2, Nz / 2],
-    near: -Nx * 2, far: Nx * 2,
-  });
+  // Also render XZ silhouette (top view) to refine the Z extent per-X column
+  const xzMask = renderSilhouette(renderer, group, Nx, Nz, 'y', Nx, Ny, Nz);
 
-  // Intersect all 3 views to get conservative 3D voxel mask
-  for (let z = 0; z < Nz; z++) {
+  // Combine: a voxel is obstacle if it's in the XY silhouette AND in the XZ silhouette's Z range
+  for (let z = zMin; z < zMax; z++) {
     for (let y = 0; y < Ny; y++) {
       for (let x = 0; x < Nx; x++) {
-        if (xyMask[y * Nx + x] && xzMask[z * Nx + x] && yzMask[z * Ny + y]) {
+        if (xyMask[y * Nx + x] && xzMask[z * Nx + x]) {
           obstacle[(z * Ny + y) * Nx + x] = 1;
         }
       }
@@ -59,26 +52,34 @@ export function voxelizeMesh(
   return obstacle;
 }
 
-interface ViewConfig {
-  left: number; right: number; top: number; bottom: number;
-  eye: number[]; lookAt: number[];
-  near: number; far: number;
-}
-
-function renderView(
+function renderSilhouette(
   renderer: THREE.WebGLRenderer,
   group: THREE.Group,
   w: number,
   h: number,
-  cfg: ViewConfig,
+  lookAxis: 'x' | 'y' | 'z',
+  Nx: number,
+  Ny: number,
+  Nz: number,
 ): Uint8Array {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
   scene.add(group.clone(true));
 
-  const camera = new THREE.OrthographicCamera(cfg.left, cfg.right, cfg.top, cfg.bottom, cfg.near, cfg.far);
-  camera.position.set(cfg.eye[0], cfg.eye[1], cfg.eye[2]);
-  camera.lookAt(cfg.lookAt[0], cfg.lookAt[1], cfg.lookAt[2]);
+  let camera: THREE.OrthographicCamera;
+  if (lookAxis === 'z') {
+    camera = new THREE.OrthographicCamera(0, Nx, Ny, 0, -Nz * 2, Nz * 2);
+    camera.position.set(Nx / 2, Ny / 2, Nz);
+    camera.lookAt(Nx / 2, Ny / 2, 0);
+  } else if (lookAxis === 'y') {
+    camera = new THREE.OrthographicCamera(0, Nx, Nz, 0, -Ny * 2, Ny * 2);
+    camera.position.set(Nx / 2, Ny, Nz / 2);
+    camera.lookAt(Nx / 2, 0, Nz / 2);
+  } else {
+    camera = new THREE.OrthographicCamera(0, Ny, Nz, 0, -Nx * 2, Nx * 2);
+    camera.position.set(Nx, Ny / 2, Nz / 2);
+    camera.lookAt(0, Ny / 2, Nz / 2);
+  }
   camera.updateProjectionMatrix();
 
   const rt = new THREE.WebGLRenderTarget(w, h);

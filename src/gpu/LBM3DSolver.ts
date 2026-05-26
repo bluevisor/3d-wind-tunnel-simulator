@@ -191,11 +191,16 @@ export class LBM3DSolver {
       this.readbackBuffer.unmap();
       this.macroData = data;
 
-      // Log first successful readback to confirm data flow
       if (this._readbackCount < 3) {
+        // Sample from the middle of the grid (avoid ground/obstacle region)
+        const midZ = Math.floor(this.Nz / 2);
+        const midY = Math.floor(this.Ny * 0.7);
         let nonZero = 0;
-        for (let i = 0; i < Math.min(data.length, 10000); i++) { if (data[i] !== 0) nonZero++; }
-        console.log(`[LBM3D] readback #${this._readbackCount}: ${nonZero} non-zero values in first 10k`);
+        for (let x = 0; x < this.Nx; x++) {
+          const idx = ((midZ * this.Ny + midY) * this.Nx + x) * 7;
+          for (let f = 0; f < 7; f++) if (data[idx + f] !== 0) nonZero++;
+        }
+        console.log(`[LBM3D] readback #${this._readbackCount}: ${nonZero} non-zero at y=${midY},z=${midZ} (row of ${this.Nx} cells)`);
         this._readbackCount++;
       }
     } catch (e) {
