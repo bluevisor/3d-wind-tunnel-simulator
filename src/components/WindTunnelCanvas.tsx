@@ -207,6 +207,7 @@ export default function WindTunnelCanvas({
   const sliceTextureRef = useRef<THREE.CanvasTexture | null>(null);
   const obstacleReadyRef = useRef(false);
   const obstacleLoadIdRef = useRef(0);
+  const cachedPivotRef = useRef<THREE.Object3D | null>(null);
 
   // State definitions for HUD
   const [fps, setFps] = useState(0);
@@ -624,6 +625,7 @@ export default function WindTunnelCanvas({
 
       // Reset flow with obstacle in place to avoid initial explosion
       solver.reset(params.inletVelocity);
+      cachedPivotRef.current = pivot;
       obstacleReadyRef.current = true;
     };
 
@@ -754,15 +756,73 @@ export default function WindTunnelCanvas({
     return () => {
       cancelled = true;
     };
-  }, [params.obstacleType, params.obstacleScale, params.nacaParams, params.angleIndex, customPoints, sceneReady, visuals.showGround]);
+  }, [params.obstacleType, params.obstacleScale, params.nacaParams, customPoints, sceneReady, visuals.showGround]);
 
-  // Handle Angle of Attack — always the outermost group's Z rotation
+  // Handle Angle of Attack — rotate 3D model + re-project silhouette + reset flow
   useEffect(() => {
     const obj = obstacleMeshRef.current;
-    if (obj) {
-      const angleRad = (params.angleIndex * Math.PI) / 180;
-      obj.rotation.z = angleRad;
+    const pivot = cachedPivotRef.current;
+    if (!obj || !pivot || !rendererRef.current) return;
+
+    const angleRad = (params.angleIndex * Math.PI) / 180;
+    obj.rotation.z = angleRad;
+
+    // Re-project obstacle mask at the new angle
+    const Nx = solver.Nx;
+    const Ny = solver.Ny;
+    const silMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    const offScene = new THREE.Scene();
+    offScene.background = new THREE.Color(0x000000);
+    const silClone = pivot.clone(true);
+    silClone.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) (child as THREE.Mesh).material = silMat;
+    });
+    const silGroup = new THREE.Group();
+    silGroup.add(silClone);
+    silGroup.position.set(Nx / 3.5, Ny / 2, 0);
+    silGroup.rotation.z = angleRad;
+    offScene.add(silGroup);
+
+    const ortho = new THREE.OrthographicCamera(0, Nx, Ny, 0, -Nx, Nx);
+    ortho.position.set(0, 0, Nx / 2);
+    ortho.lookAt(0, 0, 0);
+
+    const rt = new THREE.WebGLRenderTarget(Nx, Ny);
+    rendererRef.current.setRenderTarget(rt);
+    rendererRef.current.render(offScene, ortho);
+    rendererRef.current.setRenderTarget(null);
+
+    const pixels = new Uint8Array(Nx * Ny * 4);
+    rendererRef.current.readRenderTargetPixels(rt, 0, 0, Nx, Ny, pixels);
+    rt.dispose();
+    silMat.dispose();
+
+    solver.obstacle.fill(0);
+    for (let y = 0; y < Ny; y++) {
+      for (let x = 0; x < Nx; x++) {
+        if (pixels[(y * Nx + x) * 4] > 127) solver.obstacle[y * Nx + x] = 1;
+      }
     }
+
+    // Reapply ground
+    if (visuals.showGround) {
+      let obsMinY = Ny, obsMaxY = 0;
+      for (let y = 0; y < Ny; y++) {
+        for (let x = 0; x < Nx; x++) {
+          if (solver.obstacle[y * Nx + x] === 1) {
+            if (y < obsMinY) obsMinY = y;
+            if (y > obsMaxY) obsMaxY = y;
+          }
+        }
+      }
+      const gRow = Math.max(0, obsMinY - Math.max(Math.floor((obsMaxY - obsMinY) * 0.08), 3));
+      solver.groundRow = gRow;
+      for (let y = 0; y < gRow; y++) {
+        for (let x = 0; x < Nx; x++) solver.obstacle[y * Nx + x] = 1;
+      }
+    }
+
+    solver.reset(params.inletVelocity);
   }, [params.angleIndex]);
 
   // Toggle Visibility Settings
@@ -807,6 +867,22 @@ export default function WindTunnelCanvas({
       seedSmokeParticle(positions, ages, i, count, solver, 'distributed');
     }
   }, [params.viscosity]);
+
+  useEffect(() => {
+    if (!obstacleReadyRef.current) return;
+
+    solver.reset(params.inletVelocity);
+
+    const positions = particlePositionsRef.current;
+    const ages = particleAgesRef.current;
+    if (!positions || !ages) return;
+
+    const groundSceneY = (solver.groundRow >= 0 ? solver.groundRow : 0) - solver.Ny / 2;
+    const count = ages.length;
+    for (let i = 0; i < count; i++) {
+      seedSmokeParticle(positions, ages, i, count, solver, 'distributed', groundSceneY);
+    }
+  }, [params.inletVelocity]);
 
   // 4. MAIN SIMULATION & RENDERING ANIMATION LOOP
   useEffect(() => {
@@ -879,7 +955,7 @@ export default function WindTunnelCanvas({
 
     // Dynamically retrieve normalizer scales based on fluid selection
     if (visuals.coloring === 'velocity') {
-      maxVal = params.inletVelocity * 1.8; // clip range to look great
+      maxVal = Math.max(params.inletVelocity * 1.8, 1e-5); // clip range to look great
     } else if (visuals.coloring === 'vorticity') {
       maxVal = 0.05 + 0.1 * params.inletVelocity;
     } else {
@@ -901,7 +977,7 @@ export default function WindTunnelCanvas({
 
         let val = 0;
         if (visuals.coloring === 'velocity') {
-          val = Math.sqrt(solver.speed[cIdx]);
+          val = solver.speed[cIdx];
         } else if (visuals.coloring === 'vorticity') {
           val = solver.vorticity[cIdx];
         } else {
@@ -1054,22 +1130,18 @@ export default function WindTunnelCanvas({
 
       const vx = Number.isNaN(vel.ux) ? 0 : vel.ux;
       const vy = Number.isNaN(vel.uy) ? 0 : vel.uy;
-      const speed = vx * vx + vy * vy;
-      const boost = speed > 0 ? Math.max(32.5, 0.16 / speed) : 32.5;
+      const spd = Math.sqrt(vx * vx + vy * vy);
+      const boost = spd > 1e-6 ? Math.max(32.5, 0.4 / spd) : 32.5;
       x3d += vx * boost;
       y3d += vy * boost;
 
       z3d += (Math.random() - 0.5) * 0.12;
       ages[i]++;
 
-      const gx = Math.floor(lbmX);
-      const gy = Math.floor(lbmY);
-      let isObs = false;
-      if (gx >= 0 && gx < solver.Nx - 1 && gy >= 0 && gy < solver.Ny - 1) {
-        const idx = gy * solver.Nx + gx;
-        isObs = solver.obstacle[idx] === 1 || solver.obstacle[idx + 1] === 1 ||
-                solver.obstacle[idx + solver.Nx] === 1 || solver.obstacle[idx + solver.Nx + 1] === 1;
-      }
+      const gx = Math.round(lbmX);
+      const gy = Math.round(lbmY);
+      const isObs = gx >= 0 && gx < solver.Nx && gy >= 0 && gy < solver.Ny &&
+                    solver.obstacle[gy * solver.Nx + gx] === 1;
 
       if (y3d < groundSceneY) y3d = groundSceneY + Math.random() * 0.5;
 

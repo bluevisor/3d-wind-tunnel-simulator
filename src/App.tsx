@@ -17,6 +17,7 @@ import WindTunnelCanvas from './components/WindTunnelCanvas';
 import ShapeCreator from './components/ShapeCreator';
 import AnalyticsPanel from './components/AnalyticsPanel';
 import EducationalPanel from './components/EducationalPanel';
+import { formatKmh, inletVelocityToKmh } from './physicalScale';
 
 export default function App() {
   const Nx = 1200;
@@ -57,13 +58,13 @@ export default function App() {
     showSmoke: true,
     showStreamlines: false,
     showVectors: false,
-    showSlice: true,
+    showSlice: false,
     showSurfaceColor: true,
     showGround: true,
     sliceZ: 0,
     coloring: 'velocity',
-    particleCount: 5000,
-    particleSize: 0.3,
+    particleCount: 50000,
+    particleSize: 1.0,
   });
 
   // Toggle ground when profile changes
@@ -164,6 +165,7 @@ export default function App() {
         const Re = params.inletVelocity * 26 * (Nx / 120) / Math.max(params.viscosity, 0.001);
         const Ma = params.inletVelocity / (1 / Math.sqrt(3));
         const qDyn = 0.5 * 1.0 * params.inletVelocity * params.inletVelocity;
+        const speedKmh = inletVelocityToKmh(params.inletVelocity, Nx);
         return (
           <div className="absolute top-16 left-4 z-20 bg-slate-950/70 backdrop-blur-md border border-slate-800/50 rounded-xl px-3.5 py-2.5 pointer-events-none font-mono text-[11px] space-y-1 min-w-[160px]">
             <div className="text-[9px] text-slate-600 font-bold tracking-wider mb-1">AERODYNAMICS</div>
@@ -174,7 +176,7 @@ export default function App() {
             <div className="flex justify-between gap-4"><span className="text-slate-500">Re</span><span className="text-sky-400 font-semibold">{Re >= 1000 ? `${(Re/1000).toFixed(1)}k` : Re.toFixed(0)}</span></div>
             <div className="flex justify-between gap-4"><span className="text-slate-500">Ma</span><span className="text-slate-300">{Ma.toFixed(3)}</span></div>
             <div className="flex justify-between gap-4"><span className="text-slate-500">q</span><span className="text-slate-300">{qDyn.toFixed(4)}</span></div>
-            <div className="flex justify-between gap-4"><span className="text-slate-500">U<sub>∞</sub></span><span className="text-slate-300">{(params.inletVelocity * 2000).toFixed(0)} km/h</span></div>
+            <div className="flex justify-between gap-4"><span className="text-slate-500">U<sub>∞</sub></span><span className="text-slate-300">{formatKmh(speedKmh)} km/h</span></div>
             <div className="flex justify-between gap-4"><span className="text-slate-500">ν</span><span className="text-slate-300">{params.viscosity.toFixed(4)}</span></div>
             <div className="border-t border-slate-800/50 pt-1 mt-1 flex justify-between gap-4"><span className="text-slate-500">FPS</span><span className={`font-semibold ${fps >= 30 ? 'text-emerald-400' : fps >= 15 ? 'text-amber-400' : 'text-rose-400'}`}>{fps}</span></div>
           </div>
@@ -289,7 +291,7 @@ export default function App() {
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-500 w-16">Velocity</span>
                       <input type="range" min="0" max="0.15" step="0.005" value={params.inletVelocity} onChange={(e) => tweakParam('inletVelocity', parseFloat(e.target.value))} className="flex-1 accent-emerald-500 h-1 cursor-pointer" />
-                      <span className="text-[10px] text-emerald-400 font-mono w-14 text-right">{(params.inletVelocity * 2000).toFixed(0)} km/h</span>
+                      <span className="text-[10px] text-emerald-400 font-mono w-14 text-right">{formatKmh(inletVelocityToKmh(params.inletVelocity, Nx))} km/h</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-500 w-16">Viscosity</span>

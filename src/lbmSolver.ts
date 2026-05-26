@@ -614,34 +614,39 @@ export class LBMSolver {
       }
     }
 
-    // 5. COMPUTE AERODYNAMIC LIFT & DRAG FORCES via Momentum Exchange Summation
+    // 5. COMPUTE AERODYNAMIC FORCES via Momentum Exchange Method
+    // Force on obstacle = sum of momentum transferred from fluid at each boundary link
+    // For each fluid cell adjacent to an obstacle cell:
+    //   f_toward = distribution going from fluid toward obstacle (pre-bounce)
+    //   f_away = distribution coming back from obstacle into fluid (post-bounce)
+    //   Force contribution = e_i * (f_toward + f_away) — but this counts FROM the obstacle side
+    //   We iterate from obstacle cells looking at fluid neighbors
     let liftSum = 0.0;
     let dragSum = 0.0;
 
-    for (let y = 1; y < Ny - 1; y++) {
+    // Only count obstacle cells above the ground row (exclude ground wall from aero forces)
+    const forceMinY = Math.max(1, this.groundRow >= 0 ? this.groundRow + 1 : 1);
+    for (let y = forceMinY; y < Ny - 1; y++) {
       for (let x = 1; x < Nx - 1; x++) {
         const cIdx = y * Nx + x;
 
-        // Sum momentum exchange on boundary cell edges
-        if (this.obstacle[cIdx] === 1) {
-          for (let i = 1; i < 9; i++) {
-            const nextX = x + DX[i];
-            const nextY = y + DY[i];
-            const neighborIdx = nextY * Nx + nextX;
+        if (this.obstacle[cIdx] !== 1) continue;
 
-            // Neighbor is a fluid cell
-            if (this.obstacle[neighborIdx] === 0) {
-              const fIdx = neighborIdx * 9;
-              // Bounce momentum exchange on obstacle wall
-              const outgoingDist = this.f[fIdx + i];             // going into obstacle
-              const incomingDist = this.f[fIdx + OPPOSITE[i]];    // returned into fluid
+        for (let i = 1; i < 9; i++) {
+          const nx = x + DX[i];
+          const ny = y + DY[i];
+          const nIdx = ny * Nx + nx;
 
-              // Momentum transfer is proportional to (f_i + f_opposite) * velocity vector
-              // Exerted force is opposite to fluid momentum change
-              const momentumEx = outgoingDist + incomingDist;
-              dragSum += DX[i] * momentumEx;
-              liftSum += DY[i] * momentumEx;
-            }
+          if (this.obstacle[nIdx] === 0) {
+            const fIdx = nIdx * 9;
+            const opp = OPPOSITE[i];
+            // f going from fluid toward this obstacle cell (direction i from obstacle = opp from fluid)
+            const fToward = this.f[fIdx + opp];
+            // f bounced back into the fluid cell (direction i from fluid)
+            const fAway = this.f[fIdx + i];
+            // Net momentum transfer to obstacle (force on obstacle)
+            dragSum += DX[i] * (fToward - fAway);
+            liftSum += DY[i] * (fToward - fAway);
           }
         }
       }
