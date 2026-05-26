@@ -1,0 +1,6 @@
+{
+  "name": "3D Wind Tunnel Simulator",
+  "description": "An interactive, physically accurate 3D wind tunnel simulator featuring real-time fluid dynamics (Lattice Boltzmann Method), aerodynamic drag/lift analysis, custom NACA airfoils, and custom 3D shape uploads.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
