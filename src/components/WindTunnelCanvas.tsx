@@ -15,7 +15,7 @@ import { SimulationParams, VisualOptions, Point2D } from '../types';
 // ---------------------------------------------------------------------------
 const PARTICLE_LIFE_MIN = 800;
 const PARTICLE_LIFE_MAX = 1600;
-const SPAWN_X_FRACTION = 0.03;
+const SPAWN_X_FRACTION = 0.12;
 const STALL_LIFE_PENALTY = 10;
 
 // ---------------------------------------------------------------------------
@@ -839,7 +839,7 @@ export default function WindTunnelCanvas({
       if (s3d) {
         const lbmZ = (z + halfZ) / gs3d;
         const v = s3d.queryVelocity3D(lbmX / gs3d, lbmY / gs3d, lbmZ);
-        vx = (v.ux || 0) * gs3d; vy = (v.uy || 0) * gs3d; vz = (v.uz || 0) * gs3d;
+        vx = v.ux || 0; vy = v.uy || 0; vz = v.uz || 0;
       } else {
         const v = solver.queryVelocity(lbmX, lbmY);
         vx = v.ux || 0; vy = v.uy || 0; vz = 0;
