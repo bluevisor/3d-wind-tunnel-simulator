@@ -563,6 +563,39 @@ export default function WindTunnelCanvas({
         const centering = new THREE.Group();
         centering.add(model);
         model.position.set(-center.x, -center.y, -center.z);
+        // License plate for the Tesla
+        if (params.obstacleType === 'car') {
+          const plateCanvas = document.createElement('canvas');
+          plateCanvas.width = 256;
+          plateCanvas.height = 128;
+          const pctx = plateCanvas.getContext('2d')!;
+          pctx.fillStyle = '#0a0a0a';
+          pctx.fillRect(0, 0, 256, 128);
+          pctx.strokeStyle = '#333';
+          pctx.lineWidth = 4;
+          pctx.strokeRect(4, 4, 248, 120);
+          pctx.fillStyle = '#c8a000';
+          pctx.font = 'bold 14px sans-serif';
+          pctx.textAlign = 'center';
+          pctx.fillText('CALIFORNIA', 128, 28);
+          pctx.font = 'bold 48px monospace';
+          pctx.fillText('TESLANB', 128, 82);
+          pctx.font = '11px sans-serif';
+          pctx.fillStyle = '#999';
+          pctx.fillText('THE GOLDEN STATE', 128, 118);
+
+          const plateTex = new THREE.CanvasTexture(plateCanvas);
+          plateTex.anisotropy = 4;
+          const plateMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.31, 0.155),
+            new THREE.MeshStandardMaterial({ map: plateTex, roughness: 0.4, metalness: 0.1 }),
+          );
+          const rearBox = box.clone();
+          plateMesh.position.set(rearBox.min.x + 0.01, center.y - size.y * 0.17, 0);
+          plateMesh.rotation.y = Math.PI / 2;
+          model.add(plateMesh);
+        }
+
         const pivot = new THREE.Group();
         pivot.add(centering);
         pivot.scale.setScalar(s);
