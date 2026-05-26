@@ -519,7 +519,11 @@ export default function WindTunnelCanvas({
           if (geo) { geo.computeBoundingBox(); const sz = geo.boundingBox!.getSize(new THREE.Vector3()); if (Math.min(sz.x, sz.y, sz.z) < Math.max(sz.x, sz.y, sz.z) * 0.001) toRemove.push(c); }
         });
         toRemove.forEach(c => c.removeFromParent());
-        model.traverse(c => { if ((c as THREE.Mesh).isMesh) { (c as THREE.Mesh).material = carMat; (c as THREE.Mesh).castShadow = true; } });
+        model.traverse(c => {
+          if (!(c as THREE.Mesh).isMesh) return;
+          (c as THREE.Mesh).castShadow = true;
+          (c as THREE.Mesh).receiveShadow = true;
+        });
 
         const box = new THREE.Box3().setFromObject(model);
         const size = box.getSize(new THREE.Vector3());
