@@ -317,18 +317,18 @@ export class LBMSolver {
     }
   }
 
-  /**
-   * Evaluates the local equilibrium distribution.
-   */
-  private getEquilibrium(r: number, vx: number, vy: number): number[] {
-    const feq = new Array(9);
+  private _feqBuf = new Float64Array(9);
+
+  private getEquilibrium(r: number, vx: number, vy: number): Float64Array {
+    const feq = this._feqBuf;
     const u2 = vx * vx + vy * vy;
-    
-    feq[0] = WEIGHTS[0] * r * (1.0 - 1.5 * u2);
+    const u15 = 1.5 * u2;
+
+    feq[0] = WEIGHTS[0] * r * (1.0 - u15);
 
     for (let i = 1; i < 9; i++) {
       const udot = DX[i] * vx + DY[i] * vy;
-      feq[i] = WEIGHTS[i] * r * (1.0 + 3.0 * udot + 4.5 * udot * udot - 1.5 * u2);
+      feq[i] = WEIGHTS[i] * r * (1.0 + 3.0 * udot + 4.5 * udot * udot - u15);
     }
     return feq;
   }
@@ -505,23 +505,22 @@ export class LBMSolver {
           return;
         }
 
+        const u2 = vx * vx + vy * vy;
         this.rho[cIdx] = r;
         this.ux[cIdx] = vx;
         this.uy[cIdx] = vy;
-        this.speed[cIdx] = Math.sqrt(vx * vx + vy * vy);
+        this.speed[cIdx] = u2;
         this.pressure[cIdx] = r / 3.0;
 
-        // Update distribution: Collision
-        const u2 = vx * vx + vy * vy;
-        
-        // Zero-coordinate distribution equilibrium
-        const feq0 = WEIGHTS[0] * r * (1.0 - 1.5 * u2);
-        this.f[fIdx + 0] = this.f[fIdx + 0] - omega * (this.f[fIdx + 0] - feq0);
+        const u15 = 1.5 * u2;
+        const f = this.f;
+        const f0 = f[fIdx];
+        f[fIdx] = f0 - omega * (f0 - WEIGHTS[0] * r * (1.0 - u15));
 
         for (let i = 1; i < 9; i++) {
           const udot = DX[i] * vx + DY[i] * vy;
-          const feq = WEIGHTS[i] * r * (1.0 + 3.0 * udot + 4.5 * udot * udot - 1.5 * u2);
-          this.f[fIdx + i] = this.f[fIdx + i] - omega * (this.f[fIdx + i] - feq);
+          const fi = f[fIdx + i];
+          f[fIdx + i] = fi - omega * (fi - WEIGHTS[i] * r * (1.0 + 3.0 * udot + 4.5 * udot * udot - u15));
         }
       }
     }

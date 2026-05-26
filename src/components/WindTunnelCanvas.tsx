@@ -901,7 +901,7 @@ export default function WindTunnelCanvas({
 
         let val = 0;
         if (visuals.coloring === 'velocity') {
-          val = solver.speed[cIdx];
+          val = Math.sqrt(solver.speed[cIdx]);
         } else if (visuals.coloring === 'vorticity') {
           val = solver.vorticity[cIdx];
         } else {
@@ -1023,70 +1023,68 @@ export default function WindTunnelCanvas({
     const halfNx = solver.Nx / 2;
     const halfNy = solver.Ny / 2;
 
+    const groundLbmY = solver.groundRow >= 0 ? solver.groundRow : 0;
+    const groundSceneY = groundLbmY - halfNy;
+    const offscreen = -halfNy - 1000;
+
     for (let i = 0; i < count; i++) {
-      // particle indices
       const pxIdx = i * 3;
       const pyIdx = i * 3 + 1;
       const pzIdx = i * 3 + 2;
 
-      // Extract coordinates relative to tunnel dimensions
+      // Negative age = cooldown (particle hidden, waiting to spawn)
+      if (ages[i] < 0) {
+        ages[i]++;
+        positions[pyIdx] = offscreen;
+        if (ages[i] >= 0) {
+          seedSmokeParticle(positions, ages, i, count, solver, 'inlet', groundSceneY);
+          ages[i] = 0;
+        }
+        continue;
+      }
+
       let x3d = positions[pxIdx];
       let y3d = positions[pyIdx];
       let z3d = positions[pzIdx];
 
-      // Convert 3D scene coordinates to LBM grid indices
       const lbmX = x3d + halfNx;
       const lbmY = y3d + halfNy;
 
-      // Retrieve locally interpolated velocities from physical fluid grid
       const vel = solver.queryVelocity(lbmX, lbmY);
 
-      // Advance particles — scale so even slow flows produce visible motion
       const vx = Number.isNaN(vel.ux) ? 0 : vel.ux;
       const vy = Number.isNaN(vel.uy) ? 0 : vel.uy;
-      const baseScale = 32.5;
-      const minPixelsPerFrame = 0.4;
-      const speed = Math.sqrt(vx * vx + vy * vy);
-      const boost = speed > 0 ? Math.max(baseScale, minPixelsPerFrame / speed) : baseScale;
+      const speed = vx * vx + vy * vy;
+      const boost = speed > 0 ? Math.max(32.5, 0.16 / speed) : 32.5;
       x3d += vx * boost;
       y3d += vy * boost;
 
       z3d += (Math.random() - 0.5) * 0.12;
-
       ages[i]++;
 
-      // Check obstacle collision with surrounding cells to prevent tunneling
       const gx = Math.floor(lbmX);
       const gy = Math.floor(lbmY);
-      let isInsideObstacle = false;
-      for (let dy = 0; dy <= 1 && !isInsideObstacle; dy++) {
-        for (let dx = 0; dx <= 1 && !isInsideObstacle; dx++) {
-          const cx = gx + dx;
-          const cy = gy + dy;
-          if (cx >= 0 && cx < solver.Nx && cy >= 0 && cy < solver.Ny) {
-            if (solver.obstacle[cy * solver.Nx + cx] === 1) isInsideObstacle = true;
-          }
-        }
+      let isObs = false;
+      if (gx >= 0 && gx < solver.Nx - 1 && gy >= 0 && gy < solver.Ny - 1) {
+        const idx = gy * solver.Nx + gx;
+        isObs = solver.obstacle[idx] === 1 || solver.obstacle[idx + 1] === 1 ||
+                solver.obstacle[idx + solver.Nx] === 1 || solver.obstacle[idx + solver.Nx + 1] === 1;
       }
 
-      // Clamp particles above the LBM ground wall (allows underbody flow)
-      const groundLbmY = solver.groundRow >= 0 ? solver.groundRow : 0;
-      const groundSceneY = groundLbmY - halfNy;
       if (y3d < groundSceneY) y3d = groundSceneY + Math.random() * 0.5;
 
-      // Recycle when particles leave bounds or hit obstacle
       if (
         Number.isNaN(x3d) || Number.isNaN(y3d) || Number.isNaN(z3d) ||
         x3d >= halfNx - 1 ||
         x3d < -halfNx + 1 ||
         y3d >= halfNy - 1 ||
         y3d < groundSceneY ||
-        isInsideObstacle
+        isObs
       ) {
-        seedSmokeParticle(positions, ages, i, count, solver, 'inlet', groundSceneY);
-        x3d = positions[pxIdx];
-        y3d = positions[pyIdx];
-        z3d = positions[pzIdx];
+        // Stagger respawn: random cooldown of 1-30 frames
+        ages[i] = -(1 + Math.floor(Math.random() * 30));
+        positions[pyIdx] = offscreen;
+        continue;
       }
 
       positions[pxIdx] = x3d;
