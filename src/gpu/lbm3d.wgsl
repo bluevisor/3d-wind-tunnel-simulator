@@ -16,7 +16,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> fA: array<f32>;
 @group(0) @binding(2) var<storage, read_write> fB: array<f32>;
 @group(0) @binding(3) var<storage, read>       obstacle: array<u32>;
-@group(0) @binding(4) var<storage, read_write> macro: array<f32>;
+@group(0) @binding(4) var<storage, read_write> mfield: array<f32>;
 
 const DX = array<i32, 19>(0, 1,-1, 0, 0, 0, 0, 1,-1, 1,-1, 1,-1, 1,-1, 0, 0, 0, 0);
 const DY = array<i32, 19>(0, 0, 0, 1,-1, 0, 0, 1, 1,-1,-1, 0, 0, 0, 0, 1,-1, 1,-1);
@@ -39,14 +39,14 @@ fn computeFeq(w: f32, rho: f32, ux: f32, uy: f32, uz: f32, dx: i32, dy: i32, dz:
   return w * rho * (1.0 + 3.0 * udot + 4.5 * udot * udot - 1.5 * (ux*ux + uy*uy + uz*uz));
 }
 
-// ============ Collide: compute macroscopic + BGK collision, write back to fA in-place ============
+// ============ Collide: compute mfieldscopic + BGK collision, write back to fA in-place ============
 @compute @workgroup_size(256)
 fn collide(@builtin(global_invocation_id) gid: vec3<u32>) {
   let ci = gid.x;
   if (ci >= params.nx * params.ny * params.nz) { return; }
 
   if (obstacle[ci] == 1u) {
-    for (var f = 0u; f < 7u; f++) { macro[macIdx(ci, f)] = 0.0; }
+    for (var f = 0u; f < 7u; f++) { mfield[macIdx(ci, f)] = 0.0; }
     return;
   }
 
@@ -64,12 +64,12 @@ fn collide(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (rho > 1e-6) { ux /= rho; uy /= rho; uz /= rho; }
   else { rho = 1.0; ux = 0.0; uy = 0.0; uz = 0.0; }
 
-  macro[macIdx(ci, 0u)] = rho;
-  macro[macIdx(ci, 1u)] = ux;
-  macro[macIdx(ci, 2u)] = uy;
-  macro[macIdx(ci, 3u)] = uz;
-  macro[macIdx(ci, 4u)] = ux*ux + uy*uy + uz*uz;
-  macro[macIdx(ci, 5u)] = rho / 3.0;
+  mfield[macIdx(ci, 0u)] = rho;
+  mfield[macIdx(ci, 1u)] = ux;
+  mfield[macIdx(ci, 2u)] = uy;
+  mfield[macIdx(ci, 3u)] = uz;
+  mfield[macIdx(ci, 4u)] = ux*ux + uy*uy + uz*uz;
+  mfield[macIdx(ci, 5u)] = rho / 3.0;
 
   let omega = params.omega;
   for (var i = 0u; i < 19u; i++) {
@@ -154,7 +154,7 @@ fn vorticity(@builtin(global_invocation_id) gid: vec3<u32>) {
   let z = ci / (params.nx * params.ny);
 
   if (x < 1u || x >= params.nx-1u || y < 1u || y >= params.ny-1u || z < 1u || z >= params.nz-1u || obstacle[ci] == 1u) {
-    macro[macIdx(ci, 6u)] = 0.0;
+    mfield[macIdx(ci, 6u)] = 0.0;
     return;
   }
 
@@ -162,8 +162,8 @@ fn vorticity(@builtin(global_invocation_id) gid: vec3<u32>) {
   let yp = idx3(x,y+1u,z); let ym = idx3(x,y-1u,z);
   let zp = idx3(x,y,z+1u); let zm = idx3(x,y,z-1u);
 
-  let wx = 0.5*(macro[macIdx(yp,3u)]-macro[macIdx(ym,3u)]) - 0.5*(macro[macIdx(zp,2u)]-macro[macIdx(zm,2u)]);
-  let wy = 0.5*(macro[macIdx(zp,1u)]-macro[macIdx(zm,1u)]) - 0.5*(macro[macIdx(xp,3u)]-macro[macIdx(xm,3u)]);
-  let wz = 0.5*(macro[macIdx(xp,2u)]-macro[macIdx(xm,2u)]) - 0.5*(macro[macIdx(yp,1u)]-macro[macIdx(ym,1u)]);
-  macro[macIdx(ci, 6u)] = sqrt(wx*wx + wy*wy + wz*wz);
+  let wx = 0.5*(mfield[macIdx(yp,3u)]-mfield[macIdx(ym,3u)]) - 0.5*(mfield[macIdx(zp,2u)]-mfield[macIdx(zm,2u)]);
+  let wy = 0.5*(mfield[macIdx(zp,1u)]-mfield[macIdx(zm,1u)]) - 0.5*(mfield[macIdx(xp,3u)]-mfield[macIdx(xm,3u)]);
+  let wz = 0.5*(mfield[macIdx(xp,2u)]-mfield[macIdx(xm,2u)]) - 0.5*(mfield[macIdx(yp,1u)]-mfield[macIdx(ym,1u)]);
+  mfield[macIdx(ci, 6u)] = sqrt(wx*wx + wy*wy + wz*wz);
 }
