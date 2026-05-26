@@ -331,7 +331,9 @@ export default function WindTunnelCanvas({
     addShadowLight(0xfff5e6, 2.0, new THREE.Vector3(100 * gs, 120 * gs, 80 * gs), 4096);
     addShadowLight(0xd4e4ff, 1.0, new THREE.Vector3(-100 * gs, 60 * gs, 60 * gs), 2048);
     addShadowLight(0xffffff, 1.2, new THREE.Vector3(-40 * gs, 80 * gs, -120 * gs), 2048);
-    scene.add(new THREE.DirectionalLight(0xb0c4de, 0.25)).position.set(0, -80 * gs, 40 * gs);
+    const bounceLight = new THREE.DirectionalLight(0xb0c4de, 0.25);
+    bounceLight.position.set(0, -80 * gs, 40 * gs);
+    scene.add(bounceLight);
     const kicker = new THREE.PointLight(0x10b981, 0.4, 300 * gs);
     kicker.position.set(80 * gs, -20 * gs, -60 * gs);
     scene.add(kicker);
