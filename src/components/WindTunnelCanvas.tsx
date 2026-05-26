@@ -308,7 +308,7 @@ export default function WindTunnelCanvas({
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
 
     renderer.domElement.style.position = 'absolute';
     renderer.domElement.style.top = '0';
@@ -430,26 +430,50 @@ export default function WindTunnelCanvas({
     const keyLight = new THREE.DirectionalLight(0xfff5e6, 2.0);
     keyLight.position.set(100 * gs, 120 * gs, 80 * gs);
     keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(2048, 2048);
-    keyLight.shadow.camera.left = -40 * gs;
-    keyLight.shadow.camera.right = 40 * gs;
-    keyLight.shadow.camera.top = 20 * gs;
-    keyLight.shadow.camera.bottom = -20 * gs;
-    keyLight.shadow.camera.near = 10 * gs;
-    keyLight.shadow.camera.far = 300 * gs;
-    keyLight.shadow.bias = -0.0005;
+    keyLight.shadow.mapSize.set(4096, 4096);
+    keyLight.shadow.camera.left = -60 * gs;
+    keyLight.shadow.camera.right = 60 * gs;
+    keyLight.shadow.camera.top = 40 * gs;
+    keyLight.shadow.camera.bottom = -40 * gs;
+    keyLight.shadow.camera.near = 1 * gs;
+    keyLight.shadow.camera.far = 400 * gs;
+    keyLight.shadow.bias = -0.001;
+    keyLight.shadow.normalBias = 0.02;
     keyLight.target.position.set(obsCx, 0, 0);
-    keyLight.shadow.camera.updateProjectionMatrix();
     scene.add(keyLight);
     scene.add(keyLight.target);
 
     const fillLight = new THREE.DirectionalLight(0xd4e4ff, 1.0);
     fillLight.position.set(-100 * gs, 60 * gs, 60 * gs);
+    fillLight.castShadow = true;
+    fillLight.shadow.mapSize.set(2048, 2048);
+    fillLight.shadow.camera.left = -60 * gs;
+    fillLight.shadow.camera.right = 60 * gs;
+    fillLight.shadow.camera.top = 40 * gs;
+    fillLight.shadow.camera.bottom = -40 * gs;
+    fillLight.shadow.camera.near = 1 * gs;
+    fillLight.shadow.camera.far = 400 * gs;
+    fillLight.shadow.bias = -0.001;
+    fillLight.shadow.normalBias = 0.02;
+    fillLight.target.position.set(obsCx, 0, 0);
     scene.add(fillLight);
+    scene.add(fillLight.target);
 
     const rimLight = new THREE.DirectionalLight(0xffffff, 1.2);
     rimLight.position.set(-40 * gs, 80 * gs, -120 * gs);
+    rimLight.castShadow = true;
+    rimLight.shadow.mapSize.set(2048, 2048);
+    rimLight.shadow.camera.left = -60 * gs;
+    rimLight.shadow.camera.right = 60 * gs;
+    rimLight.shadow.camera.top = 40 * gs;
+    rimLight.shadow.camera.bottom = -40 * gs;
+    rimLight.shadow.camera.near = 1 * gs;
+    rimLight.shadow.camera.far = 400 * gs;
+    rimLight.shadow.bias = -0.001;
+    rimLight.shadow.normalBias = 0.02;
+    rimLight.target.position.set(obsCx, 0, 0);
     scene.add(rimLight);
+    scene.add(rimLight.target);
 
     const bounceLight = new THREE.DirectionalLight(0xb0c4de, 0.25);
     bounceLight.position.set(0, -80 * gs, 40 * gs);
@@ -605,10 +629,11 @@ export default function WindTunnelCanvas({
       scene.add(aoaGroup);
       obstacleMeshRef.current = aoaGroup;
 
-      // Position ground at the bottom of the obstacle
+      // Position ground flush with the bottom of the obstacle
       if (groundGroupRef.current) {
         const objBox = new THREE.Box3().setFromObject(aoaGroup);
-        groundGroupRef.current.position.y = objBox.min.y;
+        const objHeight = objBox.max.y - objBox.min.y;
+        groundGroupRef.current.position.y = objBox.min.y + objHeight * 0.012;
       }
 
       // Ground effect: fill all cells below ground as solid obstacle
@@ -809,7 +834,7 @@ export default function WindTunnelCanvas({
     return () => {
       cancelled = true;
     };
-  }, [params.obstacleType, params.obstacleScale, params.nacaParams, customPoints, sceneReady, visuals.showGround]);
+  }, [params.obstacleType, params.obstacleScale, params.nacaParams, customPoints, sceneReady, visuals.showGround, solver3D]);
 
   // Handle Angle of Attack — rotate 3D model + re-project silhouette + reset flow
   useEffect(() => {
@@ -1150,23 +1175,14 @@ export default function WindTunnelCanvas({
 
     const groundLbmY = solver.groundRow >= 0 ? solver.groundRow : 0;
     const groundSceneY = groundLbmY - halfNy;
-    const offscreen = -halfNy - 1000;
+    const s3dCur = solver3DRef.current;
+    const gs3d = s3dCur ? solver.Nx / s3dCur.Nx : 1;
+    const halfZScene = s3dCur ? s3dCur.Nz * gs3d / 2 : Infinity;
 
     for (let i = 0; i < count; i++) {
       const pxIdx = i * 3;
       const pyIdx = i * 3 + 1;
       const pzIdx = i * 3 + 2;
-
-      // Negative age = cooldown (particle hidden, waiting to spawn)
-      if (ages[i] < 0) {
-        ages[i]++;
-        positions[pyIdx] = offscreen;
-        if (ages[i] >= 0) {
-          seedSmokeParticle(positions, ages, i, count, solver, 'inlet', groundSceneY);
-          ages[i] = 0;
-        }
-        continue;
-      }
 
       let x3d = positions[pxIdx];
       let y3d = positions[pyIdx];
@@ -1191,24 +1207,30 @@ export default function WindTunnelCanvas({
         vz = 0;
       }
       const spd = Math.sqrt(vx * vx + vy * vy + vz * vz);
+      if (spd < 0.002 && ages[i] > 5) {
+        seedSmokeParticle(positions, ages, i, count, solver, 'inlet', groundSceneY);
+        ages[i] = 0;
+        continue;
+      }
       const boost = spd > 1e-6 ? Math.max(32.5, 0.4 / spd) : 32.5;
       x3d += vx * boost;
       y3d += vy * boost;
       z3d += vz * boost + (Math.random() - 0.5) * 0.06;
       ages[i]++;
 
+      const newLbmX = x3d + halfNx;
+      const newLbmY = y3d + halfNy;
       let isObs = false;
-      if (s3d) {
-        const gs3d = solver.Nx / s3d.Nx;
-        const gx3 = Math.round(lbmX / gs3d);
-        const gy3 = Math.round(lbmY / gs3d);
-        const gz3 = Math.round((z3d + s3d.Nz * gs3d / 2) / gs3d);
-        if (gx3 >= 0 && gx3 < s3d.Nx && gy3 >= 0 && gy3 < s3d.Ny && gz3 >= 0 && gz3 < s3d.Nz) {
-          isObs = s3d.obstacleData[(gz3 * s3d.Ny + gy3) * s3d.Nx + gx3] === 1;
+      if (s3dCur) {
+        const gx3 = Math.round(newLbmX / gs3d);
+        const gy3 = Math.round(newLbmY / gs3d);
+        const gz3 = Math.round((z3d + s3dCur.Nz * gs3d / 2) / gs3d);
+        if (gx3 >= 0 && gx3 < s3dCur.Nx && gy3 >= 0 && gy3 < s3dCur.Ny && gz3 >= 0 && gz3 < s3dCur.Nz) {
+          isObs = s3dCur.obstacleData[(gz3 * s3dCur.Ny + gy3) * s3dCur.Nx + gx3] === 1;
         }
       } else {
-        const gx = Math.round(lbmX);
-        const gy = Math.round(lbmY);
+        const gx = Math.round(newLbmX);
+        const gy = Math.round(newLbmY);
         isObs = gx >= 0 && gx < solver.Nx && gy >= 0 && gy < solver.Ny &&
                 solver.obstacle[gy * solver.Nx + gx] === 1;
       }
@@ -1221,11 +1243,12 @@ export default function WindTunnelCanvas({
         x3d < -halfNx + 1 ||
         y3d >= halfNy - 1 ||
         y3d < groundSceneY ||
+        z3d >= halfZScene ||
+        z3d < -halfZScene ||
         isObs
       ) {
-        // Stagger respawn: random cooldown of 1-30 frames
-        ages[i] = -(1 + Math.floor(Math.random() * 30));
-        positions[pyIdx] = offscreen;
+        seedSmokeParticle(positions, ages, i, count, solver, 'inlet', groundSceneY);
+        ages[i] = 0;
         continue;
       }
 

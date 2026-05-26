@@ -7,7 +7,7 @@ struct Params {
   nz: u32,
   u0: f32,
   omega: f32,
-  groundZ: i32,
+  groundY: i32,
   _pad0: u32,
   _pad1: u32,
 };
@@ -113,7 +113,7 @@ fn stream(@builtin(global_invocation_id) gid: vec3<u32>) {
     let sz = i32(z) - DZ[i];
 
     // Wall bounce-back
-    if (sy < 0 || sy >= i32(params.ny) || sz < params.groundZ || sz >= i32(params.nz)) {
+    if (sy < max(params.groundY, 0) || sy >= i32(params.ny) || sz < 0 || sz >= i32(params.nz)) {
       fB[fIdx(ci, i)] = fA[fIdx(ci, OPP[i])];
       continue;
     }

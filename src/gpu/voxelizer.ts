@@ -1,10 +1,5 @@
 import * as THREE from 'three';
 
-/**
- * Voxelize a 3D mesh by rendering depth maps from 6 directions and marking
- * cells that are "inside" the model (between front and back depth).
- * This produces an accurate 3D voxel mask, not just silhouette intersection.
- */
 export function voxelizeMesh(
   renderer: THREE.WebGLRenderer,
   model: THREE.Object3D,
@@ -25,19 +20,20 @@ export function voxelizeMesh(
   group.add(clone);
   group.position.set(obstacleCenter.x, obstacleCenter.y, obstacleCenter.z);
 
-  // Render XY silhouette (side view, looking along Z) — this gives x,y mask
-  const xyMask = renderSilhouette(renderer, group, Nx, Ny, 'z', Nx, Ny, Nz);
+  const maxDim = Math.max(Nx, Ny, Nz) * 2;
 
-  // Get the Z extent of the model to know how deep to extrude
+  // XY silhouette: camera looks along -Z, captures (x, y)
+  const xyMask = renderView(renderer, group, Nx, Ny, maxDim, null);
+
+  // XZ silhouette: rotate model -90° around X so old-Z maps to camera-Y,
+  // then use the same -Z looking camera. Avoids gimbal lock entirely.
+  const xzMask = renderView(renderer, group, Nx, Nz, maxDim, -Math.PI / 2);
+
   group.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(group);
   const zMin = Math.max(0, Math.floor(box.min.z));
   const zMax = Math.min(Nz, Math.ceil(box.max.z));
 
-  // Also render XZ silhouette (top view) to refine the Z extent per-X column
-  const xzMask = renderSilhouette(renderer, group, Nx, Nz, 'y', Nx, Ny, Nz);
-
-  // Combine: a voxel is obstacle if it's in the XY silhouette AND in the XZ silhouette's Z range
   for (let z = zMin; z < zMax; z++) {
     for (let y = 0; y < Ny; y++) {
       for (let x = 0; x < Nx; x++) {
@@ -52,34 +48,30 @@ export function voxelizeMesh(
   return obstacle;
 }
 
-function renderSilhouette(
+function renderView(
   renderer: THREE.WebGLRenderer,
   group: THREE.Group,
   w: number,
   h: number,
-  lookAxis: 'x' | 'y' | 'z',
-  Nx: number,
-  Ny: number,
-  Nz: number,
+  maxDim: number,
+  rotateX: number | null,
 ): Uint8Array {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
-  scene.add(group.clone(true));
 
-  let camera: THREE.OrthographicCamera;
-  if (lookAxis === 'z') {
-    camera = new THREE.OrthographicCamera(0, Nx, Ny, 0, -Nz * 2, Nz * 2);
-    camera.position.set(Nx / 2, Ny / 2, Nz);
-    camera.lookAt(Nx / 2, Ny / 2, 0);
-  } else if (lookAxis === 'y') {
-    camera = new THREE.OrthographicCamera(0, Nx, Nz, 0, -Ny * 2, Ny * 2);
-    camera.position.set(Nx / 2, Ny, Nz / 2);
-    camera.lookAt(Nx / 2, 0, Nz / 2);
+  const cloned = group.clone(true);
+  if (rotateX !== null) {
+    const wrapper = new THREE.Group();
+    wrapper.add(cloned);
+    wrapper.rotation.x = rotateX;
+    scene.add(wrapper);
   } else {
-    camera = new THREE.OrthographicCamera(0, Ny, Nz, 0, -Nx * 2, Nx * 2);
-    camera.position.set(Nx, Ny / 2, Nz / 2);
-    camera.lookAt(0, Ny / 2, Nz / 2);
+    scene.add(cloned);
   }
+
+  const camera = new THREE.OrthographicCamera(0, w, h, 0, -maxDim, maxDim);
+  camera.position.set(0, 0, 0);
+  camera.lookAt(0, 0, -1);
   camera.updateProjectionMatrix();
 
   const rt = new THREE.WebGLRenderTarget(w, h);
