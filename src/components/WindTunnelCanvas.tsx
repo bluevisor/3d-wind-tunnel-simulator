@@ -150,6 +150,7 @@ interface WindTunnelCanvasProps {
 }
 
 type SmokeSeedMode = 'distributed' | 'inlet';
+const PARTICLE_MAX_LIFETIME = 600;
 
 function seedSmokeParticle(
   positions: Float32Array,
@@ -179,7 +180,9 @@ function seedSmokeParticle(
   positions[index * 3] = xMin + phase * spawnSpan;
   positions[index * 3 + 1] = yMin + Math.random() * (yMax - yMin);
   positions[index * 3 + 2] = (Math.random() - 0.5) * 36 * gs;
-  ages[index] = phase * spawnSpan;
+  ages[index] = mode === 'distributed'
+    ? Math.floor(phase * PARTICLE_MAX_LIFETIME * 0.7)
+    : 0;
 }
 
 export default function WindTunnelCanvas({
@@ -1175,14 +1178,28 @@ export default function WindTunnelCanvas({
 
     const groundLbmY = solver.groundRow >= 0 ? solver.groundRow : 0;
     const groundSceneY = groundLbmY - halfNy;
+    const offscreen = -halfNy - 1000;
     const s3dCur = solver3DRef.current;
     const gs3d = s3dCur ? solver.Nx / s3dCur.Nx : 1;
     const halfZScene = s3dCur ? s3dCur.Nz * gs3d / 2 : Infinity;
+
+    const emitRate = Math.ceil(count * 0.003);
+    let emitted = 0;
 
     for (let i = 0; i < count; i++) {
       const pxIdx = i * 3;
       const pyIdx = i * 3 + 1;
       const pzIdx = i * 3 + 2;
+
+      if (ages[i] < 0) {
+        if (emitted < emitRate) {
+          seedSmokeParticle(positions, ages, i, count, solver, 'inlet', groundSceneY);
+          emitted++;
+        } else {
+          positions[pyIdx] = offscreen;
+        }
+        continue;
+      }
 
       let x3d = positions[pxIdx];
       let y3d = positions[pyIdx];
@@ -1194,9 +1211,9 @@ export default function WindTunnelCanvas({
       const s3d = solver3DRef.current;
       let vx: number, vy: number, vz: number;
       if (s3d) {
-        const gs3d = solver.Nx / s3d.Nx;
-        const lbmZ = (z3d + s3d.Nz * gs3d / 2) / gs3d;
-        const v = s3d.queryVelocity3D(lbmX / gs3d, lbmY / gs3d, lbmZ);
+        const gs3dLocal = solver.Nx / s3d.Nx;
+        const lbmZ = (z3d + s3d.Nz * gs3dLocal / 2) / gs3dLocal;
+        const v = s3d.queryVelocity3D(lbmX / gs3dLocal, lbmY / gs3dLocal, lbmZ);
         vx = Number.isNaN(v.ux) ? 0 : v.ux;
         vy = Number.isNaN(v.uy) ? 0 : v.uy;
         vz = Number.isNaN(v.uz) ? 0 : v.uz;
@@ -1207,16 +1224,24 @@ export default function WindTunnelCanvas({
         vz = 0;
       }
       const spd = Math.sqrt(vx * vx + vy * vy + vz * vz);
-      if (spd < 0.002 && ages[i] > 5) {
-        seedSmokeParticle(positions, ages, i, count, solver, 'inlet', groundSceneY);
-        ages[i] = 0;
+
+      if (spd < 0.003 && ages[i] > 60) {
+        ages[i] = -1;
+        positions[pyIdx] = offscreen;
         continue;
       }
+
       const boost = spd > 1e-6 ? Math.max(32.5, 0.4 / spd) : 32.5;
       x3d += vx * boost;
       y3d += vy * boost;
       z3d += vz * boost + (Math.random() - 0.5) * 0.06;
       ages[i]++;
+
+      if (ages[i] > PARTICLE_MAX_LIFETIME) {
+        ages[i] = -1;
+        positions[pyIdx] = offscreen;
+        continue;
+      }
 
       const newLbmX = x3d + halfNx;
       const newLbmY = y3d + halfNy;
@@ -1247,8 +1272,8 @@ export default function WindTunnelCanvas({
         z3d < -halfZScene ||
         isObs
       ) {
-        seedSmokeParticle(positions, ages, i, count, solver, 'inlet', groundSceneY);
-        ages[i] = 0;
+        ages[i] = -1;
+        positions[pyIdx] = offscreen;
         continue;
       }
 
