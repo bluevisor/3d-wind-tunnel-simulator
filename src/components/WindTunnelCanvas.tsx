@@ -406,9 +406,35 @@ export default function WindTunnelCanvas({
     const cx3d = solver.Nx / 3.5 - solver.Nx / 2;
     const meshGs = solver.Nx / 120;
 
-    const carMat = new THREE.MeshPhysicalMaterial({
+    const carBodyMat = new THREE.MeshPhysicalMaterial({
       color: 0x78889a, roughness: 0.28, metalness: 0.75, clearcoat: 0.3, clearcoatRoughness: 0.15, reflectivity: 0.6,
     });
+    const glassMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0x111118, roughness: 0.05, metalness: 0.0, transmission: 0.85, thickness: 0.5,
+      transparent: true, opacity: 0.4, side: THREE.DoubleSide, ior: 1.5,
+    });
+    const tireMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a, roughness: 0.9, metalness: 0.0,
+    });
+    const chromeMat = new THREE.MeshStandardMaterial({
+      color: 0xcccccc, roughness: 0.05, metalness: 1.0,
+    });
+    const lightMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff, roughness: 0.3, metalness: 0.2, emissive: 0xffffff, emissiveIntensity: 0.3,
+    });
+    const tailLightMat = new THREE.MeshStandardMaterial({
+      color: 0xff1a1a, roughness: 0.3, metalness: 0.2, emissive: 0xff0000, emissiveIntensity: 0.3,
+    });
+
+    const assignCarMaterial = (mesh: THREE.Mesh) => {
+      const name = (mesh.name + ' ' + ((mesh.material as THREE.Material)?.name || '')).toLowerCase();
+      if (/glass|window|windshield|windscreen|visor/.test(name)) { mesh.material = glassMaterial; }
+      else if (/tyre|tire|rubber|wheel_tire/.test(name)) { mesh.material = tireMat; }
+      else if (/chrome|trim|handle|mirror_cap|badge/.test(name)) { mesh.material = chromeMat; }
+      else if (/tail.?light|rear.?light|brake.?light|stop.?light/.test(name)) { mesh.material = tailLightMat; }
+      else if (/head.?light|light|lamp|signal|fog/.test(name)) { mesh.material = lightMat; }
+      else { mesh.material = carBodyMat; }
+    };
 
     const projectMask = (obj: THREE.Object3D) => {
       if (!rendererRef.current) return false;
@@ -521,8 +547,10 @@ export default function WindTunnelCanvas({
         toRemove.forEach(c => c.removeFromParent());
         model.traverse(c => {
           if (!(c as THREE.Mesh).isMesh) return;
-          (c as THREE.Mesh).castShadow = true;
-          (c as THREE.Mesh).receiveShadow = true;
+          const mesh = c as THREE.Mesh;
+          assignCarMaterial(mesh);
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
         });
 
         const box = new THREE.Box3().setFromObject(model);
@@ -575,7 +603,7 @@ export default function WindTunnelCanvas({
 
       const geo = new THREE.ExtrudeGeometry(shape, { steps: 2, depth: 30 * meshGs, bevelEnabled: true, bevelThickness: meshGs, bevelSize: 0.5 * meshGs, bevelSegments: 6, curveSegments: 24 });
       geo.center();
-      const mesh = new THREE.Mesh(geo, carMat);
+      const mesh = new THREE.Mesh(geo, carBodyMat);
       mesh.castShadow = true;
       placeObstacle(mesh, mesh);
     }
