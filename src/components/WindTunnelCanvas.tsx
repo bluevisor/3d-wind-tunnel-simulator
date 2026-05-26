@@ -218,6 +218,8 @@ export default function WindTunnelCanvas({
   paramsRef.current = params;
   const visualsRef = useRef(visuals);
   visualsRef.current = visuals;
+  const solver3DRef = useRef(solver3D);
+  solver3DRef.current = solver3D;
 
   // State definitions for HUD
   const [fps, setFps] = useState(0);
@@ -719,6 +721,10 @@ export default function WindTunnelCanvas({
                   voxObs[(z * s3.Ny + y) * s3.Nx + x] = 1;
           }
 
+          let voxCount = 0;
+          for (let i = 0; i < voxObs.length; i++) if (voxObs[i] === 1) voxCount++;
+          console.log(`[Voxelize] ${voxCount} voxels out of ${voxObs.length} (${(100*voxCount/voxObs.length).toFixed(1)}%) | grid ${s3.Nx}x${s3.Ny}x${s3.Nz}`);
+
           s3.obstacleData.set(voxObs);
           s3.groundRow = visualsRef.current.showGround && solver.groundRow >= 0
             ? Math.max(0, Math.floor(solver.groundRow / gs3d)) : -1;
@@ -965,11 +971,12 @@ export default function WindTunnelCanvas({
         const u0 = p.inletVelocity;
         const visc = p.viscosity;
 
-        if (solver3D) {
+        const s3d = solver3DRef.current;
+        if (s3d) {
           for (let s = 0; s < p.stepsPerFrame; s++) {
-            solver3D.step(u0, visc);
+            s3d.step(u0, visc);
           }
-          solver3D.readbackMacro().catch((e) => console.warn('[LBM3D] readback error:', e));
+          s3d.readbackMacro().catch((e) => console.warn('[LBM3D] readback error:', e));
         } else if (solver.isStable) {
           for (let s = 0; s < p.stepsPerFrame; s++) {
             solver.step(u0, visc);
@@ -1168,11 +1175,12 @@ export default function WindTunnelCanvas({
       const lbmX = x3d + halfNx;
       const lbmY = y3d + halfNy;
 
+      const s3d = solver3DRef.current;
       let vx: number, vy: number, vz: number;
-      if (solver3D) {
-        const gs3d = solver.Nx / solver3D.Nx;
-        const lbmZ = (z3d + solver3D.Nz * gs3d / 2) / gs3d;
-        const v = solver3D.queryVelocity3D(lbmX / gs3d, lbmY / gs3d, lbmZ);
+      if (s3d) {
+        const gs3d = solver.Nx / s3d.Nx;
+        const lbmZ = (z3d + s3d.Nz * gs3d / 2) / gs3d;
+        const v = s3d.queryVelocity3D(lbmX / gs3d, lbmY / gs3d, lbmZ);
         vx = Number.isNaN(v.ux) ? 0 : v.ux;
         vy = Number.isNaN(v.uy) ? 0 : v.uy;
         vz = Number.isNaN(v.uz) ? 0 : v.uz;
@@ -1190,13 +1198,13 @@ export default function WindTunnelCanvas({
       ages[i]++;
 
       let isObs = false;
-      if (solver3D) {
-        const gs3d = solver.Nx / solver3D.Nx;
+      if (s3d) {
+        const gs3d = solver.Nx / s3d.Nx;
         const gx3 = Math.round(lbmX / gs3d);
         const gy3 = Math.round(lbmY / gs3d);
-        const gz3 = Math.round((z3d + solver3D.Nz * gs3d / 2) / gs3d);
-        if (gx3 >= 0 && gx3 < solver3D.Nx && gy3 >= 0 && gy3 < solver3D.Ny && gz3 >= 0 && gz3 < solver3D.Nz) {
-          isObs = solver3D.obstacleData[(gz3 * solver3D.Ny + gy3) * solver3D.Nx + gx3] === 1;
+        const gz3 = Math.round((z3d + s3d.Nz * gs3d / 2) / gs3d);
+        if (gx3 >= 0 && gx3 < s3d.Nx && gy3 >= 0 && gy3 < s3d.Ny && gz3 >= 0 && gz3 < s3d.Nz) {
+          isObs = s3d.obstacleData[(gz3 * s3d.Ny + gy3) * s3d.Nx + gx3] === 1;
         }
       } else {
         const gx = Math.round(lbmX);
