@@ -17,6 +17,7 @@ const PARTICLE_LIFE_MIN = 800;
 const PARTICLE_LIFE_MAX = 1600;
 const SPAWN_X_FRACTION = 0.12;
 const STALL_LIFE_PENALTY = 10;
+const VELOCITY_EPSILON = 1e-6;
 
 // ---------------------------------------------------------------------------
 // 3-D lofted body helpers
@@ -156,6 +157,21 @@ function spawnParticle(
   }
 
   lives[i] = PARTICLE_LIFE_MIN + Math.random() * (PARTICLE_LIFE_MAX - PARTICLE_LIFE_MIN);
+}
+
+function keepTracerAtFreestream(
+  vx: number,
+  vy: number,
+  vz: number,
+  freestreamSpeed: number,
+): { vx: number; vy: number; vz: number; speed: number } {
+  const speed = Math.hypot(vx, vy, vz);
+  if (freestreamSpeed <= VELOCITY_EPSILON) return { vx: 0, vy: 0, vz: 0, speed };
+  if (speed <= VELOCITY_EPSILON) return { vx: freestreamSpeed, vy: 0, vz: 0, speed };
+  if (speed >= freestreamSpeed) return { vx, vy, vz, speed };
+
+  const scale = freestreamSpeed / speed;
+  return { vx: vx * scale, vy: vy * scale, vz: vz * scale, speed };
 }
 
 // ---------------------------------------------------------------------------
@@ -543,6 +559,10 @@ export default function WindTunnelCanvas({
         const toRemove: THREE.Object3D[] = [];
         model.traverse(c => {
           if (!(c as THREE.Mesh).isMesh) return;
+          if (params.obstacleType === 'car' && c.name.toLowerCase().includes('platnomor')) {
+            toRemove.push(c);
+            return;
+          }
           const geo = (c as THREE.Mesh).geometry;
           if (geo) { geo.computeBoundingBox(); const sz = geo.boundingBox!.getSize(new THREE.Vector3()); if (Math.min(sz.x, sz.y, sz.z) < Math.max(sz.x, sz.y, sz.z) * 0.001) toRemove.push(c); }
         });
@@ -563,6 +583,7 @@ export default function WindTunnelCanvas({
         const centering = new THREE.Group();
         centering.add(model);
         model.position.set(-center.x, -center.y, -center.z);
+
         // License plate for the Tesla
         if (params.obstacleType === 'car') {
           const plateCanvas = document.createElement('canvas');
@@ -588,12 +609,26 @@ export default function WindTunnelCanvas({
           plateTex.anisotropy = 4;
           const plateW = size.x * 0.16;
           const plateH = plateW * 0.5;
+          const centeredMin = box.min.clone().sub(center);
+          const centeredMax = box.max.clone().sub(center);
           const plateMesh = new THREE.Mesh(
             new THREE.PlaneGeometry(plateW, plateH),
-            new THREE.MeshStandardMaterial({ map: plateTex, roughness: 0.4, metalness: 0.1 }),
+            new THREE.MeshStandardMaterial({
+              map: plateTex,
+              roughness: 0.4,
+              metalness: 0.1,
+              polygonOffset: true,
+              polygonOffsetFactor: -1,
+              polygonOffsetUnits: -1,
+            }),
           );
-          plateMesh.position.set(center.x, box.min.y + size.y * 0.38, box.max.z - 0.01);
-          model.add(plateMesh);
+          plateMesh.position.set(
+            0,
+            centeredMin.y + size.y * 0.50,
+            centeredMax.z + size.z * 0.005,
+          );
+          plateMesh.renderOrder = 2;
+          centering.add(plateMesh);
         }
 
         const pivot = new THREE.Group();
@@ -912,8 +947,10 @@ export default function WindTunnelCanvas({
         vx = v.ux || 0; vy = v.uy || 0; vz = 0;
       }
 
-      const spd = Math.sqrt(vx * vx + vy * vy + vz * vz);
-      if (spd < 0.001) lives[i] -= STALL_LIFE_PENALTY;
+      const freestream = paramsRef.current.inletVelocity;
+      const advected = keepTracerAtFreestream(vx, vy, vz, freestream);
+      vx = advected.vx; vy = advected.vy; vz = advected.vz;
+      if (freestream <= VELOCITY_EPSILON && advected.speed < 0.001) lives[i] -= STALL_LIFE_PENALTY;
 
       const boost = 32.5;
       x += vx * boost;
