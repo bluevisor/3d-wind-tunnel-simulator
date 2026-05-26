@@ -100,7 +100,7 @@ export default function App() {
   const Re = params.inletVelocity * 26 * (Nx / 120) / Math.max(params.viscosity, 0.001);
   const Ma = params.inletVelocity / (1 / Math.sqrt(3));
   const qDyn = 0.5 * params.inletVelocity * params.inletVelocity;
-  const speedKmh = inletVelocityToKmh(params.inletVelocity);
+  const speedKmh = inletVelocityToKmh(params.inletVelocity, Nx);
 
   return (
     <div className="w-full h-screen bg-slate-950 text-slate-100 font-sans select-none antialiased relative overflow-hidden">
@@ -251,7 +251,7 @@ export default function App() {
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-500 w-16">Velocity</span>
                       <input type="range" min="0" max="0.15" step="0.005" value={params.inletVelocity} onChange={e => tweakParam('inletVelocity', parseFloat(e.target.value))} className="flex-1 accent-emerald-500 h-1 cursor-pointer" />
-                      <span className="text-[10px] text-emerald-400 font-mono w-14 text-right">{formatKmh(inletVelocityToKmh(params.inletVelocity))} km/h</span>
+                      <span className="text-[10px] text-emerald-400 font-mono w-14 text-right">{formatKmh(inletVelocityToKmh(params.inletVelocity, Nx))} km/h</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-500 w-16">Viscosity</span>

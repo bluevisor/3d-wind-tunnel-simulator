@@ -1,12 +1,12 @@
-const MAX_INLET_VELOCITY = 0.15;
-const MAX_KMH = 300;
+const MODEL_3_LENGTH_M = 4.694;
+const MODEL_CELLS_BASE = 26;
+const CS_AIR = 343; // speed of sound in air, m/s at 20°C
 
-export function inletVelocityToKmh(inletVelocity: number): number {
-  return (inletVelocity / MAX_INLET_VELOCITY) * MAX_KMH;
-}
-
-export function kmhToInletVelocity(kmh: number): number {
-  return (kmh / MAX_KMH) * MAX_INLET_VELOCITY;
+export function inletVelocityToKmh(inletVelocity: number, nx: number): number {
+  const modelCells = MODEL_CELLS_BASE * (nx / 120);
+  const dx = MODEL_3_LENGTH_M / modelCells;
+  const dt = dx / (CS_AIR * Math.sqrt(3));
+  return (inletVelocity * dx / dt) * 3.6;
 }
 
 export function formatKmh(kmh: number): string {

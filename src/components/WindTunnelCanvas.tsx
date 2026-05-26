@@ -16,7 +16,7 @@ import { SimulationParams, VisualOptions, Point2D } from '../types';
 const PARTICLE_LIFE_MIN = 800;
 const PARTICLE_LIFE_MAX = 1600;
 const SPAWN_X_FRACTION = 0.25;
-const STALL_LIFE_PENALTY = 8;
+const STALL_LIFE_PENALTY = 30;
 
 // ---------------------------------------------------------------------------
 // 3-D lofted body helpers
@@ -836,14 +836,13 @@ export default function WindTunnelCanvas({
       }
 
       const spd = Math.sqrt(vx * vx + vy * vy + vz * vz);
-      if (spd < 0.001) lives[i] -= STALL_LIFE_PENALTY;
+      const u0eff = s3d ? paramsRef.current.inletVelocity * gs3d : paramsRef.current.inletVelocity;
+      if (spd < u0eff * 0.05) lives[i] -= STALL_LIFE_PENALTY;
 
       const boost = 32.5;
       x += vx * boost;
       y += vy * boost;
       z += vz * boost + (Math.random() - 0.5) * 0.06;
-
-      if (y < groundSceneY) y = groundSceneY + Math.random() * 0.5;
 
       // Obstacle collision
       let isObs = false;
