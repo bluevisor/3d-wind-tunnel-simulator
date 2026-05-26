@@ -531,10 +531,12 @@ export default function WindTunnelCanvas({
 
     if (params.obstacleType === 'car' || params.obstacleType === 'train') {
       const modelUrl = params.obstacleType === 'car' ? teslaModelUrl : shinkansenModelUrl;
-      const dracoLoader = new DRACOLoader();
-      dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
       const loader = new GLTFLoader();
-      loader.setDRACOLoader(dracoLoader);
+      if (params.obstacleType === 'train') {
+        const dracoLoader = new DRACOLoader();
+        dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+        loader.setDRACOLoader(dracoLoader);
+      }
       loader.load(modelUrl, (gltf) => {
         if (!isCurrent() || !sceneRef.current || !rendererRef.current) return;
         const model = gltf.scene;
@@ -548,7 +550,7 @@ export default function WindTunnelCanvas({
         model.traverse(c => {
           if (!(c as THREE.Mesh).isMesh) return;
           const mesh = c as THREE.Mesh;
-          assignCarMaterial(mesh);
+          if (params.obstacleType === 'train') assignCarMaterial(mesh);
           mesh.castShadow = true;
           mesh.receiveShadow = true;
         });
