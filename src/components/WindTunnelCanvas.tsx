@@ -566,33 +566,33 @@ export default function WindTunnelCanvas({
         // License plate for the Tesla
         if (params.obstacleType === 'car') {
           const plateCanvas = document.createElement('canvas');
-          plateCanvas.width = 256;
-          plateCanvas.height = 128;
+          plateCanvas.width = 512;
+          plateCanvas.height = 256;
           const pctx = plateCanvas.getContext('2d')!;
           pctx.fillStyle = '#0a0a0a';
-          pctx.fillRect(0, 0, 256, 128);
-          pctx.strokeStyle = '#333';
-          pctx.lineWidth = 4;
-          pctx.strokeRect(4, 4, 248, 120);
-          pctx.fillStyle = '#c8a000';
-          pctx.font = 'bold 14px sans-serif';
+          pctx.fillRect(0, 0, 512, 256);
+          pctx.strokeStyle = '#444';
+          pctx.lineWidth = 6;
+          pctx.strokeRect(6, 6, 500, 244);
+          pctx.fillStyle = '#d4a800';
+          pctx.font = 'bold 28px sans-serif';
           pctx.textAlign = 'center';
-          pctx.fillText('CALIFORNIA', 128, 28);
-          pctx.font = 'bold 48px monospace';
-          pctx.fillText('TESLANB', 128, 82);
-          pctx.font = '11px sans-serif';
-          pctx.fillStyle = '#999';
-          pctx.fillText('THE GOLDEN STATE', 128, 118);
+          pctx.fillText('CALIFORNIA', 256, 52);
+          pctx.font = 'bold 90px monospace';
+          pctx.fillText('TESLANB', 256, 160);
+          pctx.font = '22px sans-serif';
+          pctx.fillStyle = '#888';
+          pctx.fillText('THE GOLDEN STATE', 256, 230);
 
           const plateTex = new THREE.CanvasTexture(plateCanvas);
           plateTex.anisotropy = 4;
+          const plateW = size.x * 0.16;
+          const plateH = plateW * 0.5;
           const plateMesh = new THREE.Mesh(
-            new THREE.PlaneGeometry(0.31, 0.155),
+            new THREE.PlaneGeometry(plateW, plateH),
             new THREE.MeshStandardMaterial({ map: plateTex, roughness: 0.4, metalness: 0.1 }),
           );
-          const rearBox = box.clone();
-          plateMesh.position.set(rearBox.min.x + 0.01, center.y - size.y * 0.17, 0);
-          plateMesh.rotation.y = Math.PI / 2;
+          plateMesh.position.set(center.x, box.min.y + size.y * 0.38, box.max.z - 0.01);
           model.add(plateMesh);
         }
 
