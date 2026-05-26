@@ -212,6 +212,12 @@ export default function WindTunnelCanvas({
   const obstacleLoadIdRef = useRef(0);
   const cachedPivotRef = useRef<THREE.Object3D | null>(null);
 
+  // Refs for render loop access (avoids restarting the loop on every change)
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+  const visualsRef = useRef(visuals);
+  visualsRef.current = visuals;
+
   // State definitions for HUD
   const [fps, setFps] = useState(0);
   const [, setTriggerUpdate] = useState(0);
@@ -913,27 +919,28 @@ export default function WindTunnelCanvas({
         setTriggerUpdate((u) => u + 1);
       }
 
+      const p = paramsRef.current;
+      const v = visualsRef.current;
+
       // Perform LBM Physics steps (only after obstacle is placed)
       if (isSimulating && obstacleReadyRef.current) {
-        const u0 = params.inletVelocity;
-        const visc = params.viscosity;
+        const u0 = p.inletVelocity;
+        const visc = p.viscosity;
 
         if (solver3D) {
-          // 3D GPU solver — step on GPU, async readback for visualization
-          for (let s = 0; s < params.stepsPerFrame; s++) {
+          for (let s = 0; s < p.stepsPerFrame; s++) {
             solver3D.step(u0, visc);
           }
-          // Non-blocking readback — updates macroData for next frame's particles
           solver3D.readbackMacro().catch(() => {});
         } else if (solver.isStable) {
-          for (let s = 0; s < params.stepsPerFrame; s++) {
+          for (let s = 0; s < p.stepsPerFrame; s++) {
             solver.step(u0, visc);
           }
         }
       }
 
       // Update 2D fluid heatmap texture
-      if (flowCanvasRef.current && sliceTextureRef.current) {
+      if (v.showSlice && flowCanvasRef.current && sliceTextureRef.current) {
         const ctx = flowCanvasRef.current.getContext('2d');
         if (ctx) {
           updateFluidHeatmapCanvas(ctx);
@@ -941,13 +948,9 @@ export default function WindTunnelCanvas({
         }
       }
 
-      // Update 3D forces arrow indicators
       updateForceArrows();
-
-      // Update interactive Particle smoke traces
       updateSmokeParticles();
 
-      // Update Orbit controls & render
       if (controlsRef.current) controlsRef.current.update();
       if (rendererRef.current && sceneRef.current && cameraRef.current) {
         rendererRef.current.render(sceneRef.current, cameraRef.current);
@@ -956,7 +959,7 @@ export default function WindTunnelCanvas({
 
     animationFrameId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [isSimulating, params, visuals]);
+  }, [isSimulating]);
 
   const updateFluidHeatmapCanvas = (ctx: CanvasRenderingContext2D) => {
     const Nx = solver.Nx;
@@ -1040,62 +1043,50 @@ export default function WindTunnelCanvas({
   };
 
   // Physically computes and redraws 3D force arrows indicating Drag/Lift components
+  const liftArrowRef = useRef<THREE.ArrowHelper | null>(null);
+  const dragArrowRef = useRef<THREE.ArrowHelper | null>(null);
+
   const updateForceArrows = () => {
     const group = forceArrowsGroupRef.current;
     if (!group) return;
 
-    // Clear previous arrows
-    while (group.children.length > 0) {
-      group.remove(group.children[0]);
-    }
-
     const cx3d = solver.Nx / 3.5 - solver.Nx / 2;
-    const cy3d = 0;
+    const gs = solver.Nx / 120;
+    const u0 = params.inletVelocity;
+    if (u0 < 1e-6) return;
+    const arrowScaleFactor = 0.16 / (u0 * u0);
+    const maxLen = 36 * gs;
 
-    // Lift force is vertical, Drag force is horizontal
-    let lForce = solver.lastLiftForce;
-    let dForce = solver.lastDragForce;
-
-    // In Three.js world, physical arrow scales:
-    const arrowScaleFactor = 0.16 / (params.inletVelocity * params.inletVelocity);
-
-    // Render Lift Vector (Cool neon green pointing upwards)
-    if (Math.abs(lForce) > 1e-3) {
-      const dirY = lForce > 0 ? 1 : -1;
-      const liftDirection = new THREE.Vector3(0, dirY, 0);
-      const liftMag = Math.min(Math.abs(lForce) * arrowScaleFactor, 36 * (solver.Nx / 120));
-      
-      if (liftMag > 0.5) {
-        const gs = solver.Nx / 120;
-        const liftArrow = new THREE.ArrowHelper(
-          liftDirection,
-          new THREE.Vector3(cx3d, cy3d, 0),
-          liftMag,
-          0x10b981,
-          3.5 * gs,
-          1.2 * gs
+    const lForce = solver.lastLiftForce;
+    const liftMag = Math.min(Math.abs(lForce) * arrowScaleFactor, maxLen);
+    if (liftMag > 0.5) {
+      if (!liftArrowRef.current) {
+        liftArrowRef.current = new THREE.ArrowHelper(
+          new THREE.Vector3(0, 1, 0), new THREE.Vector3(cx3d, 0, 0), 1, 0x10b981, 3.5 * gs, 1.2 * gs
         );
-        group.add(liftArrow);
+        group.add(liftArrowRef.current);
       }
+      liftArrowRef.current.setDirection(new THREE.Vector3(0, lForce > 0 ? 1 : -1, 0));
+      liftArrowRef.current.setLength(liftMag, 3.5 * gs, 1.2 * gs);
+      liftArrowRef.current.visible = true;
+    } else if (liftArrowRef.current) {
+      liftArrowRef.current.visible = false;
     }
 
-    // Render Drag Vector (Crimson red pointing downstream)
-    if (Math.abs(dForce) > 1e-3) {
-      const dirX = dForce > 0 ? 1 : -1;
-      const dragDirection = new THREE.Vector3(dirX, 0, 0);
-      const dragMag = Math.min(Math.abs(dForce) * arrowScaleFactor, 36 * (solver.Nx / 120));
-
-      if (dragMag > 0.5) {
-        const dragArrow = new THREE.ArrowHelper(
-          dragDirection,
-          new THREE.Vector3(cx3d, cy3d, 0),
-          dragMag,
-          0xef4444,
-          3.5 * (solver.Nx / 120),
-          1.2 * (solver.Nx / 120)
+    const dForce = solver.lastDragForce;
+    const dragMag = Math.min(Math.abs(dForce) * arrowScaleFactor, maxLen);
+    if (dragMag > 0.5) {
+      if (!dragArrowRef.current) {
+        dragArrowRef.current = new THREE.ArrowHelper(
+          new THREE.Vector3(1, 0, 0), new THREE.Vector3(cx3d, 0, 0), 1, 0xef4444, 3.5 * gs, 1.2 * gs
         );
-        group.add(dragArrow);
+        group.add(dragArrowRef.current);
       }
+      dragArrowRef.current.setDirection(new THREE.Vector3(dForce > 0 ? 1 : -1, 0, 0));
+      dragArrowRef.current.setLength(dragMag, 3.5 * gs, 1.2 * gs);
+      dragArrowRef.current.visible = true;
+    } else if (dragArrowRef.current) {
+      dragArrowRef.current.visible = false;
     }
   };
 
