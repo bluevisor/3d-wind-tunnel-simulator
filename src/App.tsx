@@ -18,17 +18,40 @@ import ShapeCreator from './components/ShapeCreator';
 import AnalyticsPanel from './components/AnalyticsPanel';
 import EducationalPanel from './components/EducationalPanel';
 import { formatKmh, inletVelocityToKmh } from './physicalScale';
+import { LBM3DSolver } from './gpu/LBM3DSolver';
+import { initWebGPU } from './gpu/webgpuUtils';
 
 export default function App() {
   const Nx = 1200;
   const Ny = 600;
+  const Nz = 80;
 
-  // Initialize the Lattice Boltzmann engine inside a persistent Ref to prevent React re-instantiation
+  // 2D solver as fallback
   const solverRef = useRef<LBMSolver | null>(null);
   if (!solverRef.current) {
     solverRef.current = new LBMSolver(Nx, Ny);
   }
   const solver = solverRef.current;
+
+  // 3D GPU solver (async init)
+  const solver3DRef = useRef<LBM3DSolver | null>(null);
+  const [gpuReady, setGpuReady] = useState(false);
+  const [use3D, setUse3D] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const gpu = await initWebGPU();
+      if (cancelled || !gpu) return;
+      const s3d = new LBM3DSolver(gpu.device, 200, 100, Nz);
+      await s3d.init();
+      s3d.reset(0.08);
+      solver3DRef.current = s3d;
+      setGpuReady(true);
+      setUse3D(true);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // 1. Simulation States
   const [isSimulating, setIsSimulating] = useState(true);
@@ -130,6 +153,7 @@ export default function App() {
       {/* Fullscreen 3D Viewport */}
       <WindTunnelCanvas
         solver={solver}
+        solver3D={use3D ? solver3DRef.current : null}
         params={params}
         visuals={visuals}
         isSimulating={isSimulating}
@@ -142,9 +166,20 @@ export default function App() {
         <div className="pointer-events-auto bg-slate-950/70 backdrop-blur-md border border-slate-800/50 rounded-xl px-4 py-2.5 flex items-center gap-3">
           <Wind size={16} className="text-emerald-400" />
           <span className="text-xs font-semibold tracking-wide text-slate-200">3D WIND TUNNEL</span>
-          <span className="text-[9px] font-mono text-slate-500 hidden sm:inline">LBM {Nx}x{Ny}</span>
+          <span className="text-[9px] font-mono text-slate-500 hidden sm:inline">
+            {use3D ? `D3Q19 200×100×${Nz}` : `D2Q9 ${Nx}×${Ny}`}
+          </span>
+          {use3D && <span className="text-[8px] font-bold bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">3D GPU</span>}
         </div>
         <div className="pointer-events-auto flex items-center gap-2">
+          {gpuReady && (
+            <button
+              onClick={() => setUse3D(!use3D)}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold backdrop-blur-md border transition ${use3D ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-950/70 text-slate-400 border-slate-800/50'}`}
+            >
+              {use3D ? '3D' : '2D'}
+            </button>
+          )}
           <button
             onClick={() => setIsSimulating(!isSimulating)}
             className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 backdrop-blur-md border transition ${isSimulating ? 'bg-slate-950/70 text-amber-400 border-amber-500/25 hover:bg-slate-900/80' : 'bg-emerald-500/90 text-slate-950 border-emerald-400 hover:bg-emerald-400'}`}

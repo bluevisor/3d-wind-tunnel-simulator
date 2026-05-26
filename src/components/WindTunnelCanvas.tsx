@@ -9,6 +9,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { LBMSolver, getNacaPoints } from '../lbmSolver';
+import { LBM3DSolver } from '../gpu/LBM3DSolver';
 import teslaModelUrl from '../assets/tesla_model3.glb?url';
 import shinkansenModelUrl from '../assets/shinkansen_n700.glb?url';
 import { SimulationParams, VisualOptions, Point2D } from '../types';
@@ -139,6 +140,7 @@ function buildShinkansenGeometry(scale: number): THREE.BufferGeometry {
 
 interface WindTunnelCanvasProps {
   solver: LBMSolver;
+  solver3D?: LBM3DSolver | null;
   params: SimulationParams;
   visuals: VisualOptions;
   isSimulating: boolean;
@@ -181,6 +183,7 @@ function seedSmokeParticle(
 
 export default function WindTunnelCanvas({
   solver,
+  solver3D,
   params,
   visuals,
   isSimulating,
@@ -911,11 +914,21 @@ export default function WindTunnelCanvas({
       }
 
       // Perform LBM Physics steps (only after obstacle is placed)
-      if (isSimulating && solver.isStable && obstacleReadyRef.current) {
+      if (isSimulating && obstacleReadyRef.current) {
         const u0 = params.inletVelocity;
         const visc = params.viscosity;
-        for (let s = 0; s < params.stepsPerFrame; s++) {
-          solver.step(u0, visc);
+
+        if (solver3D) {
+          // 3D GPU solver — step on GPU, async readback for visualization
+          for (let s = 0; s < params.stepsPerFrame; s++) {
+            solver3D.step(u0, visc);
+          }
+          // Non-blocking readback — updates macroData for next frame's particles
+          solver3D.readbackMacro().catch(() => {});
+        } else if (solver.isStable) {
+          for (let s = 0; s < params.stepsPerFrame; s++) {
+            solver.step(u0, visc);
+          }
         }
       }
 
@@ -1126,16 +1139,25 @@ export default function WindTunnelCanvas({
       const lbmX = x3d + halfNx;
       const lbmY = y3d + halfNy;
 
-      const vel = solver.queryVelocity(lbmX, lbmY);
-
-      const vx = Number.isNaN(vel.ux) ? 0 : vel.ux;
-      const vy = Number.isNaN(vel.uy) ? 0 : vel.uy;
-      const spd = Math.sqrt(vx * vx + vy * vy);
+      let vx: number, vy: number, vz: number;
+      if (solver3D) {
+        const gs3d = solver.Nx / solver3D.Nx;
+        const lbmZ = (z3d + solver3D.Nz * gs3d / 2) / gs3d;
+        const v = solver3D.queryVelocity3D(lbmX / gs3d, lbmY / gs3d, lbmZ);
+        vx = Number.isNaN(v.ux) ? 0 : v.ux;
+        vy = Number.isNaN(v.uy) ? 0 : v.uy;
+        vz = Number.isNaN(v.uz) ? 0 : v.uz;
+      } else {
+        const vel = solver.queryVelocity(lbmX, lbmY);
+        vx = Number.isNaN(vel.ux) ? 0 : vel.ux;
+        vy = Number.isNaN(vel.uy) ? 0 : vel.uy;
+        vz = 0;
+      }
+      const spd = Math.sqrt(vx * vx + vy * vy + vz * vz);
       const boost = spd > 1e-6 ? Math.max(32.5, 0.4 / spd) : 32.5;
       x3d += vx * boost;
       y3d += vy * boost;
-
-      z3d += (Math.random() - 0.5) * 0.12;
+      z3d += vz * boost + (Math.random() - 0.5) * 0.06;
       ages[i]++;
 
       const gx = Math.round(lbmX);
