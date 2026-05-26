@@ -1,8 +1,12 @@
 const MAX_INLET_VELOCITY = 0.15;
 const MAX_KMH = 300;
 
-export function inletVelocityToKmh(inletVelocity: number, _nx: number): number {
+export function inletVelocityToKmh(inletVelocity: number): number {
   return (inletVelocity / MAX_INLET_VELOCITY) * MAX_KMH;
+}
+
+export function kmhToInletVelocity(kmh: number): number {
+  return (kmh / MAX_KMH) * MAX_INLET_VELOCITY;
 }
 
 export function formatKmh(kmh: number): string {
