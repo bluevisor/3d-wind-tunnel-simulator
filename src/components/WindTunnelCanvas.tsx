@@ -10,6 +10,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { LBMSolver, getNacaPoints } from '../lbmSolver';
 import { LBM3DSolver } from '../gpu/LBM3DSolver';
+import { voxelizeFromSideView } from '../gpu/voxelizer';
 import teslaModelUrl from '../assets/tesla_model3.glb?url';
 import shinkansenModelUrl from '../assets/shinkansen_n700.glb?url';
 import { SimulationParams, VisualOptions, Point2D } from '../types';
@@ -687,6 +688,29 @@ export default function WindTunnelCanvas({
         pivot.rotation.y = params.obstacleType === 'car' ? Math.PI / 2 : Math.PI;
 
         placeObstacle(pivot, pivot);
+
+        // Voxelize for 3D GPU solver
+        if (solver3D && rendererRef.current) {
+          const s3 = solver3D;
+          const gs3d = solver.Nx / s3.Nx;
+          const obsCenter = { x: s3.Nx / 3.5, y: s3.Ny / 2, z: s3.Nz / 2 };
+          const voxClone = pivot.clone(true);
+          voxClone.scale.multiplyScalar(1 / gs3d);
+          const voxObs = voxelizeFromSideView(
+            rendererRef.current, voxClone, s3.Nx, s3.Ny, s3.Nz,
+            obsCenter, (paramsRef.current.angleIndex * Math.PI) / 180,
+          );
+          if (visualsRef.current.showGround && solver.groundRow >= 0) {
+            const gRow3d = Math.floor(solver.groundRow / gs3d);
+            for (let z = 0; z < s3.Nz; z++)
+              for (let y = 0; y < gRow3d; y++)
+                for (let x = 0; x < s3.Nx; x++)
+                  voxObs[(z * s3.Ny + y) * s3.Nx + x] = 1;
+          }
+          s3.obstacleData.set(voxObs);
+          s3.uploadObstacle();
+          s3.reset(paramsRef.current.inletVelocity);
+        }
       }, undefined, (error) => {
         if (isCurrentLoad()) {
           console.error('Failed to load wind tunnel model', error);
@@ -1151,10 +1175,21 @@ export default function WindTunnelCanvas({
       z3d += vz * boost + (Math.random() - 0.5) * 0.06;
       ages[i]++;
 
-      const gx = Math.round(lbmX);
-      const gy = Math.round(lbmY);
-      const isObs = gx >= 0 && gx < solver.Nx && gy >= 0 && gy < solver.Ny &&
-                    solver.obstacle[gy * solver.Nx + gx] === 1;
+      let isObs = false;
+      if (solver3D) {
+        const gs3d = solver.Nx / solver3D.Nx;
+        const gx3 = Math.round(lbmX / gs3d);
+        const gy3 = Math.round(lbmY / gs3d);
+        const gz3 = Math.round((z3d + solver3D.Nz * gs3d / 2) / gs3d);
+        if (gx3 >= 0 && gx3 < solver3D.Nx && gy3 >= 0 && gy3 < solver3D.Ny && gz3 >= 0 && gz3 < solver3D.Nz) {
+          isObs = solver3D.obstacleData[(gz3 * solver3D.Ny + gy3) * solver3D.Nx + gx3] === 1;
+        }
+      } else {
+        const gx = Math.round(lbmX);
+        const gy = Math.round(lbmY);
+        isObs = gx >= 0 && gx < solver.Nx && gy >= 0 && gy < solver.Ny &&
+                solver.obstacle[gy * solver.Nx + gx] === 1;
+      }
 
       if (y3d < groundSceneY) y3d = groundSceneY + Math.random() * 0.5;
 
