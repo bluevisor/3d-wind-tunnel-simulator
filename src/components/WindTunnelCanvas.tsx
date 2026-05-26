@@ -642,13 +642,15 @@ export default function WindTunnelCanvas({
     particleLivesRef.current = lives;
   }, [visuals.particleCount]);
 
-  // ---- Reset particles on viscosity / velocity change ----
+  // ---- Reset solvers + particles on velocity / viscosity change ----
   useEffect(() => {
     const pos = particlePositionsRef.current, lives = particleLivesRef.current;
     if (!pos || !lives || !obstacleReadyRef.current) return;
     solver.reset(params.inletVelocity);
+    const s3d = solver3DRef.current;
+    if (s3d) s3d.reset(params.inletVelocity);
     const groundY = solver.groundRow >= 0 ? solver.groundRow - solver.Ny / 2 : -solver.Ny / 2;
-    for (let i = 0; i < lives.length; i++) { spawnParticle(pos, lives, i, solver, groundY, solver3DRef.current ?? null); lives[i] = Math.random() * PARTICLE_LIFE_MAX; }
+    for (let i = 0; i < lives.length; i++) { spawnParticle(pos, lives, i, solver, groundY, s3d ?? null); lives[i] = Math.random() * PARTICLE_LIFE_MAX; }
   }, [params.inletVelocity, params.viscosity]);
 
   // ---- Main render loop ----
@@ -827,7 +829,7 @@ export default function WindTunnelCanvas({
       if (s3d) {
         const lbmZ = (z + halfZ) / gs3d;
         const v = s3d.queryVelocity3D(lbmX / gs3d, lbmY / gs3d, lbmZ);
-        vx = v.ux || 0; vy = v.uy || 0; vz = v.uz || 0;
+        vx = (v.ux || 0) * gs3d; vy = (v.uy || 0) * gs3d; vz = (v.uz || 0) * gs3d;
       } else {
         const v = solver.queryVelocity(lbmX, lbmY);
         vx = v.ux || 0; vy = v.uy || 0; vz = 0;
@@ -836,7 +838,7 @@ export default function WindTunnelCanvas({
       const spd = Math.sqrt(vx * vx + vy * vy + vz * vz);
       if (spd < 0.001) lives[i] -= STALL_LIFE_PENALTY;
 
-      const boost = spd > 1e-6 ? Math.max(32.5, 0.4 / spd) : 32.5;
+      const boost = 32.5;
       x += vx * boost;
       y += vy * boost;
       z += vz * boost + (Math.random() - 0.5) * 0.06;
