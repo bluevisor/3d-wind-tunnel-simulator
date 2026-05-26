@@ -10,7 +10,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { LBMSolver, getNacaPoints } from '../lbmSolver';
 import { LBM3DSolver } from '../gpu/LBM3DSolver';
-import { voxelizeFromSideView } from '../gpu/voxelizer';
+import { voxelizeMesh } from '../gpu/voxelizer';
 import teslaModelUrl from '../assets/tesla_model3.glb?url';
 import shinkansenModelUrl from '../assets/shinkansen_n700.glb?url';
 import { SimulationParams, VisualOptions, Point2D } from '../types';
@@ -436,7 +436,9 @@ export default function WindTunnelCanvas({
     keyLight.shadow.camera.near = 10 * gs;
     keyLight.shadow.camera.far = 300 * gs;
     keyLight.shadow.bias = -0.001;
+    keyLight.target.position.set(obsCx, 0, 0);
     scene.add(keyLight);
+    scene.add(keyLight.target);
 
     const fillLight = new THREE.DirectionalLight(0xd4e4ff, 1.0);
     fillLight.position.set(-100 * gs, 60 * gs, 60 * gs);
@@ -689,25 +691,36 @@ export default function WindTunnelCanvas({
 
         placeObstacle(pivot, pivot);
 
-        // Voxelize for 3D GPU solver
+        // Voxelize 3D model for GPU solver using 3-view intersection
         if (solver3D && rendererRef.current) {
           const s3 = solver3D;
           const gs3d = solver.Nx / s3.Nx;
           const obsCenter = { x: s3.Nx / 3.5, y: s3.Ny / 2, z: s3.Nz / 2 };
-          const voxClone = pivot.clone(true);
-          voxClone.scale.multiplyScalar(1 / gs3d);
-          const voxObs = voxelizeFromSideView(
-            rendererRef.current, voxClone, s3.Nx, s3.Ny, s3.Nz,
-            obsCenter, (paramsRef.current.angleIndex * Math.PI) / 180,
+
+          // Scale the pivot down from 2D grid space to 3D grid space
+          const voxPivot = pivot.clone(true);
+          voxPivot.scale.multiplyScalar(1 / gs3d);
+          // Apply AOA rotation
+          const aoaWrap = new THREE.Group();
+          aoaWrap.add(voxPivot);
+          aoaWrap.rotation.z = (paramsRef.current.angleIndex * Math.PI) / 180;
+
+          const voxObs = voxelizeMesh(
+            rendererRef.current, aoaWrap, s3.Nx, s3.Ny, s3.Nz, obsCenter,
           );
+
+          // Apply ground
           if (visualsRef.current.showGround && solver.groundRow >= 0) {
-            const gRow3d = Math.floor(solver.groundRow / gs3d);
+            const gRow3d = Math.max(0, Math.floor(solver.groundRow / gs3d));
             for (let z = 0; z < s3.Nz; z++)
               for (let y = 0; y < gRow3d; y++)
                 for (let x = 0; x < s3.Nx; x++)
                   voxObs[(z * s3.Ny + y) * s3.Nx + x] = 1;
           }
+
           s3.obstacleData.set(voxObs);
+          s3.groundRow = visualsRef.current.showGround && solver.groundRow >= 0
+            ? Math.max(0, Math.floor(solver.groundRow / gs3d)) : -1;
           s3.uploadObstacle();
           s3.reset(paramsRef.current.inletVelocity);
         }
