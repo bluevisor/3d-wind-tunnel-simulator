@@ -16,7 +16,7 @@ import { SimulationParams, VisualOptions, Point2D } from '../types';
 const PARTICLE_LIFE_MIN = 800;
 const PARTICLE_LIFE_MAX = 1600;
 const SPAWN_X_FRACTION = 0.25;
-const STALL_LIFE_PENALTY = 30;
+const STALL_LIFE_PENALTY = 10;
 
 // ---------------------------------------------------------------------------
 // 3-D lofted body helpers
@@ -134,8 +134,9 @@ function spawnParticle(
   const gs = solver.Nx / 120;
   const xMin = -halfNx + 1;
 
+  const wallMargin = solver.Ny * 0.03;
   positions[i * 3] = xMin + Math.random() * solver.Nx * SPAWN_X_FRACTION;
-  positions[i * 3 + 1] = groundY + Math.random() * (halfNy - 1 - groundY);
+  positions[i * 3 + 1] = (groundY + wallMargin) + Math.random() * (halfNy - 1 - wallMargin - groundY - wallMargin);
 
   if (solver3D) {
     const gs3d = solver.Nx / solver3D.Nx;
@@ -836,8 +837,7 @@ export default function WindTunnelCanvas({
       }
 
       const spd = Math.sqrt(vx * vx + vy * vy + vz * vz);
-      const u0eff = s3d ? paramsRef.current.inletVelocity * gs3d : paramsRef.current.inletVelocity;
-      if (spd < u0eff * 0.05) lives[i] -= STALL_LIFE_PENALTY;
+      if (spd < 0.001) lives[i] -= STALL_LIFE_PENALTY;
 
       const boost = 32.5;
       x += vx * boost;
