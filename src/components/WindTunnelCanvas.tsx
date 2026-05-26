@@ -15,7 +15,7 @@ import { SimulationParams, VisualOptions, Point2D } from '../types';
 // ---------------------------------------------------------------------------
 const PARTICLE_LIFE_MIN = 800;
 const PARTICLE_LIFE_MAX = 1600;
-const SPAWN_X_FRACTION = 0.25;
+const SPAWN_X_FRACTION = 0.03;
 const STALL_LIFE_PENALTY = 10;
 
 // ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ function buildShinkansenGeometry(scale: number): THREE.BufferGeometry {
 }
 
 // ---------------------------------------------------------------------------
-// Particle spawn — random position near inlet, random lifetime
+// Particle spawn — fluid tracers filling the tunnel volume
 // ---------------------------------------------------------------------------
 
 function spawnParticle(
@@ -128,15 +128,24 @@ function spawnParticle(
   solver: LBMSolver,
   groundY: number,
   solver3D: LBM3DSolver | null,
+  fillDomain: boolean,
 ) {
   const halfNx = solver.Nx / 2;
   const halfNy = solver.Ny / 2;
   const gs = solver.Nx / 120;
   const xMin = -halfNx + 1;
-
+  const xMax = halfNx - 1;
   const wallMargin = solver.Ny * 0.03;
-  positions[i * 3] = xMin + Math.random() * solver.Nx * SPAWN_X_FRACTION;
-  positions[i * 3 + 1] = (groundY + wallMargin) + Math.random() * (halfNy - 1 - wallMargin - groundY - wallMargin);
+  const yMin = groundY + wallMargin;
+  const yMax = halfNy - 1 - wallMargin;
+
+  if (fillDomain) {
+    positions[i * 3] = xMin + Math.random() * (xMax - xMin);
+  } else {
+    positions[i * 3] = xMin + Math.random() * solver.Nx * SPAWN_X_FRACTION;
+  }
+
+  positions[i * 3 + 1] = yMin + Math.random() * (yMax - yMin);
 
   if (solver3D) {
     const gs3d = solver.Nx / solver3D.Nx;
@@ -344,7 +353,7 @@ export default function WindTunnelCanvas({
     const lives = new Float32Array(particleCount);
     const groundY = -solver.Ny / 2;
     for (let i = 0; i < particleCount; i++) {
-      spawnParticle(pos, lives, i, solver, groundY, null);
+      spawnParticle(pos, lives, i, solver, groundY, null, true);
       lives[i] = Math.random() * PARTICLE_LIFE_MAX;
     }
     const particlesGeo = new THREE.BufferGeometry();
@@ -632,7 +641,7 @@ export default function WindTunnelCanvas({
     const lives = new Float32Array(count);
     const groundY = solver.groundRow >= 0 ? solver.groundRow - solver.Ny / 2 : -solver.Ny / 2;
     for (let i = 0; i < count; i++) {
-      spawnParticle(pos, lives, i, solver, groundY, solver3DRef.current ?? null);
+      spawnParticle(pos, lives, i, solver, groundY, solver3DRef.current ?? null, true);
       lives[i] = Math.random() * PARTICLE_LIFE_MAX;
     }
     const geo = new THREE.BufferGeometry();
@@ -651,7 +660,7 @@ export default function WindTunnelCanvas({
     const s3d = solver3DRef.current;
     if (s3d) s3d.reset(params.inletVelocity);
     const groundY = solver.groundRow >= 0 ? solver.groundRow - solver.Ny / 2 : -solver.Ny / 2;
-    for (let i = 0; i < lives.length; i++) { spawnParticle(pos, lives, i, solver, groundY, s3d ?? null); lives[i] = Math.random() * PARTICLE_LIFE_MAX; }
+    for (let i = 0; i < lives.length; i++) { spawnParticle(pos, lives, i, solver, groundY, s3d ?? null, true); lives[i] = Math.random() * PARTICLE_LIFE_MAX; }
   }, [params.inletVelocity, params.viscosity]);
 
   // ---- Main render loop ----
@@ -818,7 +827,7 @@ export default function WindTunnelCanvas({
       lives[i]--;
 
       if (lives[i] <= 0) {
-        spawnParticle(positions, lives, i, solver, groundSceneY, s3d ?? null);
+        spawnParticle(positions, lives, i, solver, groundSceneY, s3d ?? null, false);
         continue;
       }
 
