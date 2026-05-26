@@ -251,6 +251,9 @@ export class LBMSolver {
   public pressure: Float32Array;
   public vorticity: Float32Array;
 
+  // Ground effect: solid wall at this Y row (-1 = disabled, uses tunnel bottom)
+  public groundRow: number = -1;
+
   // Real-time coefficients
   public lastLiftForce: number = 0;
   public lastDragForce: number = 0;
@@ -284,22 +287,26 @@ export class LBMSolver {
     const Nx = this.Nx;
     const Ny = this.Ny;
     this.isStable = true;
+    this.lastLiftForce = 0;
+    this.lastDragForce = 0;
+    this.lastLiftCoeff = 0;
+    this.lastDragCoeff = 0;
 
     for (let y = 0; y < Ny; y++) {
       for (let x = 0; x < Nx; x++) {
         const cIdx = y * Nx + x;
+        const isObs = this.obstacle[cIdx] === 1;
         const r = 1.0;
-        const vx = u0;
+        const vx = isObs ? 0.0 : u0;
         const vy = 0.0;
 
         this.rho[cIdx] = r;
         this.ux[cIdx] = vx;
         this.uy[cIdx] = vy;
-        this.speed[cIdx] = vx;
+        this.speed[cIdx] = isObs ? 0.0 : vx;
         this.pressure[cIdx] = r / 3.0;
         this.vorticity[cIdx] = 0.0;
 
-        // Initialize distributions to equilibrium
         const fIdx = cIdx * 9;
         const feq = this.getEquilibrium(r, vx, vy);
         for (let i = 0; i < 9; i++) {
@@ -534,8 +541,8 @@ export class LBMSolver {
           const nextY = y + DY[i];
 
           // Out-of-bounds safety boundary (top/bottom wall bounce, inlet/outlet flow)
-          if (nextY < 0 || nextY >= Ny) {
-            // Bounce-back from top/bottom walls (vertical bounce)
+          const effectiveBottom = this.groundRow >= 0 ? this.groundRow : 0;
+          if (nextY < effectiveBottom || nextY >= Ny) {
             const oppIdx = OPPOSITE[i];
             this.fTemp[fIdx + oppIdx] = currentVal;
             continue;
@@ -644,8 +651,17 @@ export class LBMSolver {
     this.lastDragForce = dragSum;
     this.lastLiftForce = liftSum;
 
-    // Reference drag & lift coefficients based on pressure/dynamic velocity profile
-    const refDim = 15; // approximate dimension (scaled)
+    // Compute reference dimension from obstacle extent
+    let obsMinY = Ny, obsMaxY = 0;
+    for (let y = 0; y < Ny; y++) {
+      for (let x = 0; x < Nx; x++) {
+        if (this.obstacle[y * Nx + x] === 1) {
+          if (y < obsMinY) obsMinY = y;
+          if (y > obsMaxY) obsMaxY = y;
+        }
+      }
+    }
+    const refDim = Math.max(obsMaxY - obsMinY, 1);
     const dynPres = 0.5 * 1.0 * u0 * u0;
     if (dynPres > 1e-5) {
       this.lastDragCoeff = dragSum / (dynPres * refDim);

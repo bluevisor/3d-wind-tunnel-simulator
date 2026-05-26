@@ -62,28 +62,20 @@ export default function App() {
     showGround: true,
     sliceZ: 0,
     coloring: 'velocity',
-    particleCount: 1200,
+    particleCount: 5000,
     particleSize: 0.3,
   });
 
-  // Reset flow and toggle ground when profile changes
+  // Toggle ground when profile changes
   useEffect(() => {
-    solver.reset(params.inletVelocity);
     const groundTypes = ['car', 'train'];
     tweakVisual('showGround', groundTypes.includes(params.obstacleType));
   }, [params.obstacleType]);
 
-  // Obstacle mask is set by WindTunnelCanvas via 3D→2D projection for all types
-
-  // Handle flow reset to clean laminar inflow
+  // Flow reset is handled by WindTunnelCanvas.placeObstacle (after obstacle mask is set)
   const resetFlow = () => {
     solver.reset(params.inletVelocity);
   };
-
-  // Reset flow when viscosity changes to avoid stale particle distributions
-  useEffect(() => {
-    solver.reset(params.inletVelocity);
-  }, [params.viscosity]);
 
   // State Change Updaters
   const tweakParam = <K extends keyof SimulationParams>(key: K, val: SimulationParams[K]) => {
@@ -182,7 +174,7 @@ export default function App() {
             <div className="flex justify-between gap-4"><span className="text-slate-500">Re</span><span className="text-sky-400 font-semibold">{Re >= 1000 ? `${(Re/1000).toFixed(1)}k` : Re.toFixed(0)}</span></div>
             <div className="flex justify-between gap-4"><span className="text-slate-500">Ma</span><span className="text-slate-300">{Ma.toFixed(3)}</span></div>
             <div className="flex justify-between gap-4"><span className="text-slate-500">q</span><span className="text-slate-300">{qDyn.toFixed(4)}</span></div>
-            <div className="flex justify-between gap-4"><span className="text-slate-500">U<sub>∞</sub></span><span className="text-slate-300">{(params.inletVelocity * 500).toFixed(0)} km/h</span></div>
+            <div className="flex justify-between gap-4"><span className="text-slate-500">U<sub>∞</sub></span><span className="text-slate-300">{(params.inletVelocity * 2000).toFixed(0)} km/h</span></div>
             <div className="flex justify-between gap-4"><span className="text-slate-500">ν</span><span className="text-slate-300">{params.viscosity.toFixed(4)}</span></div>
             <div className="border-t border-slate-800/50 pt-1 mt-1 flex justify-between gap-4"><span className="text-slate-500">FPS</span><span className={`font-semibold ${fps >= 30 ? 'text-emerald-400' : fps >= 15 ? 'text-amber-400' : 'text-rose-400'}`}>{fps}</span></div>
           </div>
@@ -237,8 +229,8 @@ export default function App() {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] text-slate-500 w-16">Density</span>
-                          <input type="range" min="200" max="5000" step="100" value={visuals.particleCount} onChange={(e) => tweakVisual('particleCount', parseInt(e.target.value))} className="flex-1 accent-emerald-500 h-1 cursor-pointer" />
-                          <span className="text-[10px] text-emerald-400 font-mono w-10 text-right">{visuals.particleCount}</span>
+                          <input type="range" min="1000" max="100000" step="1000" value={visuals.particleCount} onChange={(e) => tweakVisual('particleCount', parseInt(e.target.value))} className="flex-1 accent-emerald-500 h-1 cursor-pointer" />
+                          <span className="text-[10px] text-emerald-400 font-mono w-10 text-right">{visuals.particleCount >= 1000 ? `${(visuals.particleCount/1000).toFixed(0)}k` : visuals.particleCount}</span>
                         </div>
                       </div>
                     )}
@@ -296,8 +288,8 @@ export default function App() {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-500 w-16">Velocity</span>
-                      <input type="range" min="0.02" max="0.13" step="0.005" value={params.inletVelocity} onChange={(e) => tweakParam('inletVelocity', parseFloat(e.target.value))} className="flex-1 accent-emerald-500 h-1 cursor-pointer" />
-                      <span className="text-[10px] text-emerald-400 font-mono w-14 text-right">{(params.inletVelocity * 500).toFixed(0)} km/h</span>
+                      <input type="range" min="0" max="0.15" step="0.005" value={params.inletVelocity} onChange={(e) => tweakParam('inletVelocity', parseFloat(e.target.value))} className="flex-1 accent-emerald-500 h-1 cursor-pointer" />
+                      <span className="text-[10px] text-emerald-400 font-mono w-14 text-right">{(params.inletVelocity * 2000).toFixed(0)} km/h</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-500 w-16">Viscosity</span>

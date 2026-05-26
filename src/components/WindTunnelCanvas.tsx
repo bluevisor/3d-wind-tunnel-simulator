@@ -154,10 +154,12 @@ function seedSmokeParticle(
   index: number,
   count: number,
   solver: LBMSolver,
-  mode: SmokeSeedMode
+  mode: SmokeSeedMode,
+  groundY?: number
 ) {
   const gs = solver.Nx / 120;
   const halfNx = solver.Nx / 2;
+  const halfNy = solver.Ny / 2;
   const xMin = -halfNx + 1;
   const xMax = halfNx - 1;
   const xSpan = xMax - xMin;
@@ -168,8 +170,11 @@ function seedSmokeParticle(
     ? xSpan
     : Math.min(xSpan, Math.max(18 * gs, solver.Nx * 0.12));
 
+  const yMin = groundY !== undefined ? groundY : -halfNy + 1;
+  const yMax = halfNy - 1;
+
   positions[index * 3] = xMin + phase * spawnSpan;
-  positions[index * 3 + 1] = (Math.random() - 0.5) * solver.Ny * 0.95;
+  positions[index * 3 + 1] = yMin + Math.random() * (yMax - yMin);
   positions[index * 3 + 2] = (Math.random() - 0.5) * 36 * gs;
   ages[index] = phase * spawnSpan;
 }
@@ -200,6 +205,8 @@ export default function WindTunnelCanvas({
   const slicePlaneRef = useRef<THREE.Mesh | null>(null);
   const groundGroupRef = useRef<THREE.Group | null>(null);
   const sliceTextureRef = useRef<THREE.CanvasTexture | null>(null);
+  const obstacleReadyRef = useRef(false);
+  const obstacleLoadIdRef = useRef(0);
 
   // State definitions for HUD
   const [fps, setFps] = useState(0);
@@ -278,7 +285,7 @@ export default function WindTunnelCanvas({
     setDimensions({ width: initialWidth, height: initialHeight });
 
     const camera = new THREE.PerspectiveCamera(45, initialWidth / initialHeight, 0.1 * gs, 5000 * gs);
-    camera.position.set(obsCx, 0, 95 * gs);
+    camera.position.set(obsCx, 3 * gs, 32 * gs);
     camera.lookAt(obsCx, 0, 0);
     cameraRef.current = camera;
 
@@ -287,6 +294,8 @@ export default function WindTunnelCanvas({
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.1;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     renderer.domElement.style.position = 'absolute';
     renderer.domElement.style.top = '0';
@@ -331,6 +340,7 @@ export default function WindTunnelCanvas({
     });
     const floor = new THREE.Mesh(floorGeo, floorMat);
     floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
     groundGroup.add(floor);
 
     groundGroup.position.y = -tunnelHeight * 0.07;
@@ -375,7 +385,7 @@ export default function WindTunnelCanvas({
     });
     const slicePlane = new THREE.Mesh(sliceGeo, sliceMat);
     // position inside tunnel center, offset slightly forward to prevent overlap with obstacle
-    slicePlane.position.set(0, 0, 0.1);
+    slicePlane.position.set(0, 0, -0.5);
     scene.add(slicePlane);
     slicePlaneRef.current = slicePlane;
 
@@ -406,6 +416,15 @@ export default function WindTunnelCanvas({
 
     const keyLight = new THREE.DirectionalLight(0xfff5e6, 2.0);
     keyLight.position.set(100 * gs, 120 * gs, 80 * gs);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.set(2048, 2048);
+    keyLight.shadow.camera.left = -40 * gs;
+    keyLight.shadow.camera.right = 40 * gs;
+    keyLight.shadow.camera.top = 20 * gs;
+    keyLight.shadow.camera.bottom = -20 * gs;
+    keyLight.shadow.camera.near = 10 * gs;
+    keyLight.shadow.camera.far = 300 * gs;
+    keyLight.shadow.bias = -0.001;
     scene.add(keyLight);
 
     const fillLight = new THREE.DirectionalLight(0xd4e4ff, 1.0);
@@ -472,6 +491,15 @@ export default function WindTunnelCanvas({
     const scene = sceneRef.current;
     if (!scene || !sceneReady) return;
 
+    const loadId = ++obstacleLoadIdRef.current;
+    let cancelled = false;
+    const isCurrentLoad = () => !cancelled && loadId === obstacleLoadIdRef.current;
+
+    obstacleReadyRef.current = false;
+    solver.obstacle.fill(0);
+    solver.groundRow = -1;
+    solver.reset(0);
+
     // Remove existing obstacle
     if (obstacleMeshRef.current) {
       scene.remove(obstacleMeshRef.current);
@@ -500,7 +528,7 @@ export default function WindTunnelCanvas({
 
     // --- Helper: project a 3D object onto the LBM grid as obstacle mask ---
     const projectObstacleMask = (obj: THREE.Object3D) => {
-      if (!rendererRef.current) return;
+      if (!rendererRef.current) return false;
       const Nx = solver.Nx;
       const Ny = solver.Ny;
       const silMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
@@ -533,19 +561,22 @@ export default function WindTunnelCanvas({
       rt.dispose();
       silMat.dispose();
 
+      let maskPixels = 0;
       solver.obstacle.fill(0);
       for (let y = 0; y < Ny; y++) {
         for (let x = 0; x < Nx; x++) {
           if (pixels[(y * Nx + x) * 4] > 127) {
             solver.obstacle[y * Nx + x] = 1;
+            maskPixels++;
           }
         }
       }
+      return maskPixels > 0;
     };
 
     // --- Helper: place finished obstacle in scene + update ground ---
     const placeObstacle = (obj: THREE.Object3D, pivot: THREE.Object3D) => {
-      projectObstacleMask(pivot);
+      if (!isCurrentLoad() || !projectObstacleMask(pivot)) return;
 
       const aoaGroup = new THREE.Group();
       aoaGroup.add(obj);
@@ -563,6 +594,37 @@ export default function WindTunnelCanvas({
         const objBox = new THREE.Box3().setFromObject(aoaGroup);
         groundGroupRef.current.position.y = objBox.min.y;
       }
+
+      // Ground effect: fill all cells below ground as solid obstacle
+      if (visuals.showGround) {
+        let obsMinY = solver.Ny;
+        let obsMaxY = 0;
+        for (let y = 0; y < solver.Ny; y++) {
+          for (let x = 0; x < solver.Nx; x++) {
+            if (solver.obstacle[y * solver.Nx + x] === 1) {
+              if (y < obsMinY) obsMinY = y;
+              if (y > obsMaxY) obsMaxY = y;
+            }
+          }
+        }
+        const obsHeight = Math.max(obsMaxY - obsMinY, 1);
+        const groundGap = Math.max(Math.floor(obsHeight * 0.08), 3);
+        const gRow = Math.max(0, obsMinY - groundGap);
+        solver.groundRow = gRow;
+
+        // Mark all cells below ground as solid — no fluid exists below ground
+        for (let y = 0; y < gRow; y++) {
+          for (let x = 0; x < solver.Nx; x++) {
+            solver.obstacle[y * solver.Nx + x] = 1;
+          }
+        }
+      } else {
+        solver.groundRow = -1;
+      }
+
+      // Reset flow with obstacle in place to avoid initial explosion
+      solver.reset(params.inletVelocity);
+      obstacleReadyRef.current = true;
     };
 
     const meshGs = solver.Nx / 120;
@@ -574,7 +636,7 @@ export default function WindTunnelCanvas({
       const loader = new GLTFLoader();
       loader.setDRACOLoader(dracoLoader);
       loader.load(modelUrl, (gltf) => {
-        if (!sceneRef.current || !rendererRef.current) return;
+        if (!isCurrentLoad() || !sceneRef.current || !rendererRef.current) return;
         const model = gltf.scene;
 
         const toRemove: THREE.Object3D[] = [];
@@ -592,6 +654,7 @@ export default function WindTunnelCanvas({
         model.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
             (child as THREE.Mesh).material = carMaterial;
+            (child as THREE.Mesh).castShadow = true;
           }
         });
 
@@ -613,8 +676,14 @@ export default function WindTunnelCanvas({
         pivot.rotation.y = params.obstacleType === 'car' ? Math.PI / 2 : Math.PI;
 
         placeObstacle(pivot, pivot);
+      }, undefined, (error) => {
+        if (isCurrentLoad()) {
+          console.error('Failed to load wind tunnel model', error);
+        }
       });
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
 
     // --- Non-GLB obstacles: build extruded 3D geometry ---
@@ -678,10 +747,14 @@ export default function WindTunnelCanvas({
       geometry.center();
 
       const mesh = new THREE.Mesh(geometry, carMaterial);
+      mesh.castShadow = true;
       placeObstacle(mesh, mesh);
     }
 
-  }, [params.obstacleType, params.obstacleScale, params.nacaParams, customPoints, sceneReady]);
+    return () => {
+      cancelled = true;
+    };
+  }, [params.obstacleType, params.obstacleScale, params.nacaParams, params.angleIndex, customPoints, sceneReady, visuals.showGround]);
 
   // Handle Angle of Attack — always the outermost group's Z rotation
   useEffect(() => {
@@ -761,8 +834,8 @@ export default function WindTunnelCanvas({
         setTriggerUpdate((u) => u + 1);
       }
 
-      // Perform LBM Physics steps
-      if (isSimulating && solver.isStable) {
+      // Perform LBM Physics steps (only after obstacle is placed)
+      if (isSimulating && solver.isStable && obstacleReadyRef.current) {
         const u0 = params.inletVelocity;
         const visc = params.viscosity;
         for (let s = 0; s < params.stepsPerFrame; s++) {
@@ -904,13 +977,14 @@ export default function WindTunnelCanvas({
       const liftMag = Math.min(Math.abs(lForce) * arrowScaleFactor, 36 * (solver.Nx / 120));
       
       if (liftMag > 0.5) {
+        const gs = solver.Nx / 120;
         const liftArrow = new THREE.ArrowHelper(
           liftDirection,
           new THREE.Vector3(cx3d, cy3d, 0),
           liftMag,
-          0x10b981, // bright green
-          3.5, // head width
-          1.2  // head height
+          0x10b981,
+          3.5 * gs,
+          1.2 * gs
         );
         group.add(liftArrow);
       }
@@ -927,9 +1001,9 @@ export default function WindTunnelCanvas({
           dragDirection,
           new THREE.Vector3(cx3d, cy3d, 0),
           dragMag,
-          0xef4444, // ruby red
-          3.5,
-          1.2
+          0xef4444,
+          3.5 * (solver.Nx / 120),
+          1.2 * (solver.Nx / 120)
         );
         group.add(dragArrow);
       }
@@ -995,16 +1069,21 @@ export default function WindTunnelCanvas({
         }
       }
 
-      // Recycle only when particles leave the tunnel or hit the obstacle — no age cap
+      // Clamp particles above the LBM ground wall (allows underbody flow)
+      const groundLbmY = solver.groundRow >= 0 ? solver.groundRow : 0;
+      const groundSceneY = groundLbmY - halfNy;
+      if (y3d < groundSceneY) y3d = groundSceneY + Math.random() * 0.5;
+
+      // Recycle when particles leave bounds or hit obstacle
       if (
         Number.isNaN(x3d) || Number.isNaN(y3d) || Number.isNaN(z3d) ||
         x3d >= halfNx - 1 ||
         x3d < -halfNx + 1 ||
         y3d >= halfNy - 1 ||
-        y3d < -halfNy + 1 ||
+        y3d < groundSceneY ||
         isInsideObstacle
       ) {
-        seedSmokeParticle(positions, ages, i, count, solver, 'inlet');
+        seedSmokeParticle(positions, ages, i, count, solver, 'inlet', groundSceneY);
         x3d = positions[pxIdx];
         y3d = positions[pyIdx];
         z3d = positions[pzIdx];
